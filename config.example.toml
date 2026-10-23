@@ -1,0 +1,30 @@
+# Configuracion de lienzo: ~/.config/lienzo/config.toml
+# Todas las claves son opcionales; lo que falte toma el valor de aqui.
+
+# Carpeta de la que tira `lienzo next` (sin subcarpetas, orden alfabetico).
+directory = "~/Imágenes/lienzo"
+
+[video]
+# Decodificacion por hardware de mpv. En la RTX 5070 con el driver 615
+# funcionan nvdec (CUDA) y vulkan. "no" la desactiva.
+hwdec = "nvdec"
+# Capa layer-shell de mpvpaper. "bottom" queda encima del fondo que dibuja
+# Noctalia (capa background) y debajo de las ventanas.
+layer = "bottom"
+# Opciones extra de mpv, p. ej. [ "speed=0.5" ]. Sin espacios dentro.
+mpv_options = []
+
+[pause]
+# Pausa si hay una ventana a pantalla completa en un workspace visible.
+# Maximizar (SUPER+D) no cuenta: el fondo sigue viendose por los huecos.
+fullscreen = true
+# Pausa mientras la ventana activa tenga una de estas clases. Son expresiones
+# regulares (sin distinguir mayusculas) contra class e initialClass; las ves
+# con `hyprctl clients`.
+classes = [
+    "^steam$",                    # cliente de Steam y Big Picture
+    "^steam_app_\\d+$",           # juegos de Steam / Proton
+    "^(net\\.lutris\\.)?lutris$",
+    "^heroic$",
+    # "^gamescope$",
+]

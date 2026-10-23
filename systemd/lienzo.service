@@ -1,0 +1,18 @@
+# Servicio de usuario. Va atado a graphical-session.target, que UWSM levanta
+# con el entorno de Hyprland ya importado (HYPRLAND_INSTANCE_SIGNATURE,
+# WAYLAND_DISPLAY); si la sesion cae, el servicio cae con ella.
+[Unit]
+Description=lienzo: gestor de fondos de pantalla
+Documentation=file://%h/Proyectos/lienzo/README.md
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/lienzo daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
