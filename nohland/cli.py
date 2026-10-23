@@ -42,6 +42,15 @@ def imprimir_estado(e: dict) -> None:
             # deteccion funciona y que el siguiente video arrancara en pausa.
             print(f"    · {razon}")
         print(f"  Carpeta: {m['directory']}")
+    g = e.get("greeter")
+    if g:
+        if not g["available"]:
+            print("Greeter: sin preparar (sudo tools/preparar-greeter.sh, una vez)")
+        elif g["mode"] == "no":
+            print("Greeter: no se toca")
+        else:
+            que = "como el escritorio" if g["mode"] == "escritorio" else Path(g["image"] or "?").name
+            print(f"Greeter: {que}")
     r = e.get("rotation")
     if r:
         if not r["enabled"]:
@@ -79,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
                     "exclude/include <archivo> lo quita o lo vuelve a meter en la rotacion")
     p_rot.add_argument("accion", choices=["on", "off", "every", "order", "exclude", "include"])
     p_rot.add_argument("valor", nargs="?")
+    p_gre = sub.add_parser("greeter", help="fondo de la pantalla de inicio de sesion",
+                           description="escritorio: el mismo que el escritorio; fija <archivo>: una imagen o "
+                                       "video concreto; no: no tocarlo")
+    p_gre.add_argument("modo", choices=["escritorio", "fija", "no"])
+    p_gre.add_argument("archivo", nargs="?", type=Path)
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
     p_status.add_argument("--json", action="store_true", help="salida en JSON")
     args = ap.parse_args(argv)
@@ -111,6 +125,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             clave = "exclude" if accion == "exclude" else "include"
             peticion[clave] = [os.path.abspath(Path(valor).expanduser())]
+    if args.orden == "greeter":
+        peticion["mode"] = args.modo
+        if args.archivo:
+            peticion["image"] = os.path.abspath(args.archivo.expanduser())
+        elif args.modo == "fija":
+            ap.error("greeter fija necesita un archivo")
     if getattr(args, "monitor", None):
         peticion["monitor"] = args.monitor
     if args.orden == "set":

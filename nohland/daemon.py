@@ -37,7 +37,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import backends, config, energia
+from . import backends, config, energia, greeter
 from .backends import BackendError, MpvPaper
 from .config import ANIMATED_EXT, CONTROL_SOCKET, IMAGE_EXT, RUNTIME_DIR, STATE_PATH, Config
 from .hyprland import Hyprland, HyprlandError
@@ -101,6 +101,10 @@ class Guardado:
     rotacion_minutos: float | None = None
     rotacion_orden: str = "orden"
     rotacion_excluidos: set[str] = field(default_factory=set)
+    # Pantalla de inicio de sesion: "escritorio" (copia del fondo que da la
+    # paleta), "fija" (greeter_imagen) o "no" (no se toca)
+    greeter_modo: str = "no"
+    greeter_imagen: str | None = None
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -117,6 +121,8 @@ class Guardado:
             rotacion_minutos=datos.get("rotation_minutes"),
             rotacion_orden=datos.get("rotation_order", "orden"),
             rotacion_excluidos=set(datos.get("rotation_excluded", [])),
+            greeter_modo=datos.get("greeter_mode", "no"),
+            greeter_imagen=datos.get("greeter_image"),
         )
 
     def escribir(self) -> None:
@@ -129,6 +135,8 @@ class Guardado:
             "rotation_minutes": self.rotacion_minutos,
             "rotation_order": self.rotacion_orden,
             "rotation_excluded": sorted(self.rotacion_excluidos),
+            "greeter_mode": self.greeter_modo,
+            "greeter_image": self.greeter_imagen,
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -150,6 +158,7 @@ class Daemon:
         self._rotacion_timer: asyncio.TimerHandle | None = None
         self._gracia_timer: asyncio.TimerHandle | None = None
         self.pendientes: set[str] = set()
+        self._greeter_copiado: Path | None = None
         self._stop = asyncio.Event()
         # asyncio solo guarda referencias debiles a las tareas sueltas
         self._tareas: set[asyncio.Task] = set()
@@ -413,6 +422,7 @@ class Daemon:
         backends.limpiar_frames(conservar)
         if paleta in orden:
             log.info("paleta desde %s: %s", paleta, self.pantallas[paleta].imagen_noctalia)
+        await self._actualizar_greeter()
 
     async def _vigilar(self, p: Pantalla, player: MpvPaper) -> None:
         codigo = await player.wait()
@@ -424,6 +434,68 @@ class Daemon:
             return  # el monitor se ha ido y mpvpaper con el
         p.error = f"mpvpaper termino inesperadamente (codigo {codigo})"
         log.error("%s: %s reproduciendo %s", p.nombre, p.error, player.path)
+
+    # -------------------------------------------------------- greeter
+
+    async def _actualizar_greeter(self) -> None:
+        """Copia al greeter la imagen que toca segun el modo.
+
+        Se llama tras cada cambio de fondo; si la imagen es la misma que la
+        ultima copiada, no hace nada. Es copiar un fichero, en un hilo.
+        """
+        modo = self.guardado.greeter_modo
+        if modo == "no" or not greeter.disponible():
+            return
+        if modo == "fija" and self.guardado.greeter_imagen:
+            origen = Path(self.guardado.greeter_imagen)
+            if animado(origen):
+                try:
+                    origen = await backends.extraer_frame(origen)
+                except (OSError, BackendError) as e:
+                    log.warning("greeter: sin fotograma de %s: %s", origen.name, e)
+                    return
+        else:
+            paleta = self.monitor_paleta()
+            origen = self.pantallas[paleta].imagen_noctalia if paleta else None
+        if not origen or not origen.is_file() or origen == self._greeter_copiado:
+            return
+        try:
+            await asyncio.to_thread(greeter.copiar, origen)
+        except OSError as e:
+            log.warning("greeter: no pude copiar %s: %s", origen, e)
+            return
+        self._greeter_copiado = origen
+        log.info("greeter: fondo de inicio de sesion -> %s", origen.name)
+
+    async def poner_greeter(self, modo: str | None, imagen: str | None) -> None:
+        g = self.guardado
+        if modo is not None:
+            if modo not in greeter.MODOS:
+                raise ValueError(f"modo de greeter no valido: {modo!r} ({', '.join(greeter.MODOS)})")
+            g.greeter_modo = modo
+        if imagen is not None:
+            ruta = Path(os.path.abspath(Path(imagen).expanduser()))
+            if not ruta.is_file() or tipo_de(ruta) is None:
+                raise ValueError(f"no es un fondo valido: {ruta}")
+            g.greeter_imagen = str(ruta)
+        g.escribir()
+        self._greeter_copiado = None  # que se copie aunque coincida con la ultima
+        log.info("greeter: modo %s%s", g.greeter_modo,
+                 f" ({Path(g.greeter_imagen).name})" if g.greeter_modo == "fija" and g.greeter_imagen else "")
+        await self._actualizar_greeter()
+
+    async def refrescar_paleta(self) -> None:
+        """Vuelve a mandar a Noctalia la imagen del monitor de la paleta.
+
+        Hace falta al encender «colores segun el fondo» desde la ventana:
+        Noctalia saca la paleta del ultimo wallpaper-set, y hasta el siguiente
+        cambio de fondo no tendria de donde.
+        """
+        paleta = self.monitor_paleta()
+        imagen = self.pantallas[paleta].imagen_noctalia if paleta else None
+        if imagen:
+            await backends.noctalia_set(imagen, paleta)
+            log.info("paleta: refrescada desde %s", imagen.name)
 
     # -------------------------------------------------------- rotacion
 
@@ -665,6 +737,10 @@ class Daemon:
             await self.poner_rotacion(
                 encendida=p.get("enabled"), minutos=p.get("minutes"), orden=p.get("order"),
                 excluir=p.get("exclude"), incluir=p.get("include"))
+        elif orden == "greeter":
+            await self.poner_greeter(p.get("mode"), p.get("image"))
+        elif orden == "palette":
+            await self.refrescar_paleta()
         elif orden != "status":
             raise ValueError(f"orden desconocida: {orden!r}")
         return {"ok": True, "status": await self.status()}
@@ -702,6 +778,13 @@ class Daemon:
                     "next_in_s": round(self._rotacion_hasta - asyncio.get_running_loop().time())
                     if self._rotacion_hasta else None,
                     "pending": sorted(self.pendientes),
+                },
+                "greeter": {
+                    "available": greeter.disponible(),
+                    "mode": self.guardado.greeter_modo,
+                    "image": self.guardado.greeter_imagen,
+                    "file": str(greeter.FICHERO),
+                    "last": str(self._greeter_copiado) if self._greeter_copiado else None,
                 }}
 
 

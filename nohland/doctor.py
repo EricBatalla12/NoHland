@@ -147,6 +147,15 @@ def revisar() -> list[tuple[str, str, str, str]]:
                   "añade al autostart de Hyprland: dbus-update-activation-environment --systemd --all "
                   "&& systemctl --user start nohland (ver README, «Sin UWSM»)")
 
+    # --- inicio de sesion (opcional)
+    from . import greeter
+    if shutil.which("noctalia-greeter"):
+        if greeter.disponible():
+            anota(OK, "Inicio de sesión", f"NoHland puede cambiar su fondo ({greeter.FICHERO})")
+        else:
+            anota(AVISO, "Inicio de sesión", "noctalia-greeter está, pero sin preparar para NoHland",
+                  "opcional: sudo tools/preparar-greeter.sh (una vez)")
+
     # --- carpeta
     if cfg.directory.is_dir():
         n = sum(1 for p in cfg.directory.iterdir()

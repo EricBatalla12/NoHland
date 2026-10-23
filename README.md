@@ -59,6 +59,15 @@ libadwaita que hace todo lo del CLI:
 - **Conseguir fondos**: botón con enlaces a Wallhaven, Wallpaper Abyss,
   MoeWalls, MotionBGs y el Workshop de Wallpaper Engine. Solo abre la web en el
   navegador; lo que descargues en la carpeta aparece solo en la colección.
+- **Colores e inicio de sesión** (botón de la paleta en la barra):
+  - «Los colores siguen al fondo»: enciende o apaga la paleta de Noctalia
+    sacada del fondo (`noctalia msg color-scheme-set`), con el estilo del
+    generador (fiel, suave, vivo...). Al apagarla vuelve a la paleta fija que
+    tuvieras en Noctalia. Qué apps se recolorean se elige en los ajustes de
+    Noctalia (plantillas).
+  - Fondo de la pantalla de inicio de sesión: «Como el escritorio» (con
+    vídeos, su fotograma), «Imagen fija» (también desde el menú de cada
+    tarjeta: «Usar en el inicio de sesión») o «No tocarla». Ver más abajo.
 - «Abrir…» para un archivo de otra carpeta, y en el menú, Ajustes (edita
   `config.toml` y reinicia el servicio) y Acerca de.
 
@@ -85,6 +94,9 @@ nohland rotate on|off   # rotación automática
 nohland rotate every 30 # cada 30 minutos
 nohland rotate order aleatorio   # o «orden»
 nohland rotate exclude <archivo> # sacarlo de la rotación (include lo vuelve a meter)
+nohland greeter escritorio      # fondo del inicio de sesión = el del escritorio
+nohland greeter fija <archivo>  # ...o uno concreto (no: no tocarlo)
+nohland doctor          # revisa que el equipo tenga lo necesario
 nohland gui             # la ventana
 ```
 
@@ -169,6 +181,28 @@ hl.exec_cmd("dbus-update-activation-environment --systemd --all && systemctl --u
 
 **Por qué un servicio systemd y no `exec-once` a secas:** systemd reinicia el
 daemon si cae y manda los logs al journal sin hacer nada más.
+
+## Pantalla de inicio de sesión (opcional)
+
+El greeter (noctalia-greeter) corre como otro usuario: no puede leer tu home y
+su carpeta es de root. Para que NoHland le cambie el fondo sin pedir
+contraseña hay que prepararlo **una vez**:
+
+```
+sudo ./tools/preparar-greeter.sh
+```
+
+Crea `/var/lib/greeter-wallpaper` (tuya para escribir, legible por el greeter)
+y añade a `/var/lib/noctalia-greeter/greeter.toml` que el fondo es
+`current.png` de esa carpeta (con copia de seguridad del fichero). A partir de
+ahí NoHland copia la imagen en cada cambio: un fichero, sin contraseña y sin
+coste apreciable (40 ms la orden completa, medido).
+
+Con `--colores`, además, activa la sincronización oficial sin contraseña
+(`noctalia-greeter passwordless-sync enable`). Después, en Noctalia:
+Ajustes → Seguridad → Noctalia Greeter → «Auto-Sync Greeter», y los colores del
+inicio de sesión seguirán a los del escritorio. El fondo lo sigue poniendo
+NoHland: lo de greeter.toml gana a la sincronización.
 
 ## Icono
 

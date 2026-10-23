@@ -364,6 +364,163 @@ class PopoverRotacion(Gtk.Popover):
             self.ventana.app.activate_action("rotacion-orden", GLib.Variant("s", nombre))
 
 
+# ------------------------------------------------------------ colores y greeter
+
+# Generadores de paleta de Noctalia (docs.noctalia.dev, theming), con un nombre claro
+ESTILOS_PALETA = [
+    ("m3-content", "Fiel al fondo (m3-content)"),
+    ("m3-tonal-spot", "Suave (m3-tonal-spot)"),
+    ("vibrant", "Vivo (vibrant)"),
+    ("m3-fruit-salad", "Variado (m3-fruit-salad)"),
+    ("m3-rainbow", "Arcoíris (m3-rainbow)"),
+    ("faithful", "Exacto (faithful)"),
+    ("soft", "Pastel (soft)"),
+    ("muted", "Apagado (muted)"),
+    ("m3-monochrome", "Monocromo (m3-monochrome)"),
+]
+
+
+def esquema_noctalia() -> tuple[str, str]:
+    """(fuente, nombre) de la paleta de Noctalia, p. ej. ("wallpaper", "m3-content")."""
+    r = subprocess.run(["noctalia", "msg", "color-scheme-get"], capture_output=True, text=True, timeout=10)
+    partes = r.stdout.split()
+    if r.returncode != 0 or len(partes) < 2:
+        raise RuntimeError(r.stdout.strip() or r.stderr.strip() or "Noctalia no responde")
+    return partes[0], partes[1]
+
+
+class PopoverEscritorio(Gtk.Popover):
+    """Colores del escritorio (paleta de Noctalia) y fondo del inicio de sesion."""
+
+    def __init__(self, ventana: "Ventana") -> None:
+        super().__init__()
+        self.ventana = ventana
+        self._pintando = False
+        caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=420,
+                       margin_top=14, margin_bottom=14, margin_start=14, margin_end=14)
+
+        # --- colores
+        caja.append(_etiqueta("Colores del escritorio", "heading", xalign=0))
+        fila = Gtk.Box(spacing=10)
+        textos = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        textos.append(_etiqueta("Los colores siguen al fondo", xalign=0))
+        self.info_colores = _etiqueta("", "dim-label", "caption", xalign=0, wrap=True, max_width_chars=44)
+        textos.append(self.info_colores)
+        fila.append(textos)
+        self.colores = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.colores.connect("notify::active", self._colores_cambiados)
+        fila.append(self.colores)
+        caja.append(fila)
+        fila = Gtk.Box(spacing=10)
+        fila.append(_etiqueta("Estilo", "dim-label", xalign=0, hexpand=True))
+        self.estilo = Gtk.DropDown(model=Gtk.StringList.new([t for _, t in ESTILOS_PALETA]))
+        self.estilo.connect("notify::selected", self._estilo_cambiado)
+        fila.append(self.estilo)
+        caja.append(fila)
+        mas = Gtk.Button(label="Qué apps se recolorean… (ajustes de Noctalia)", halign=Gtk.Align.START)
+        mas.add_css_class("flat")
+        mas.connect("clicked", lambda *_: (self.popdown(), ventana.app.activate_action("noctalia-ajustes", None)))
+        caja.append(mas)
+
+        caja.append(Gtk.Separator(margin_top=4, margin_bottom=4))
+
+        # --- greeter
+        caja.append(_etiqueta("Pantalla de inicio de sesión", "heading", xalign=0))
+        self.modo_greeter = Adw.ToggleGroup()
+        for nombre, texto in (("escritorio", "Como el escritorio"), ("fija", "Imagen fija"), ("no", "No tocarla")):
+            self.modo_greeter.add(Adw.Toggle(name=nombre, label=texto))
+        self.modo_greeter.connect("notify::active-name", self._modo_greeter_cambiado)
+        caja.append(self.modo_greeter)
+        fila = Gtk.Box(spacing=10)
+        self.mini_greeter = Gtk.Image(pixel_size=96)
+        fila.append(self.mini_greeter)
+        self.info_greeter = _etiqueta("", "dim-label", "caption", xalign=0, wrap=True, hexpand=True,
+                                      max_width_chars=30, selectable=True)
+        fila.append(self.info_greeter)
+        self.elegir_greeter = Gtk.Button(label="Elegir…", valign=Gtk.Align.CENTER)
+        self.elegir_greeter.connect("clicked", lambda *_: self._elegir_imagen())
+        fila.append(self.elegir_greeter)
+        caja.append(fila)
+        self._mini_ruta = None
+        self.set_child(caja)
+        self.connect("show", lambda *_: self.leer_colores())
+
+    # --- colores
+
+    def leer_colores(self) -> None:
+        def hecho(r, error):
+            self._pintando = True
+            if error:
+                self.colores.set_sensitive(False)
+                self.estilo.set_sensitive(False)
+                self.info_colores.set_label(f"No pude preguntar a Noctalia: {error}")
+            else:
+                fuente, nombre = r
+                activo = fuente == "wallpaper"
+                self.colores.set_sensitive(True)
+                self.colores.set_active(activo)
+                self.estilo.set_sensitive(activo)
+                valores = [v for v, _ in ESTILOS_PALETA]
+                if activo and nombre in valores:
+                    self.estilo.set_selected(valores.index(nombre))
+                self.info_colores.set_label(
+                    "Noctalia saca la paleta del fondo; con vídeos, de un fotograma" if activo
+                    else f"Ahora Noctalia usa una paleta fija ({fuente}: {nombre})")
+            self._pintando = False
+        en_hilo(esquema_noctalia, hecho)
+
+    def _colores_cambiados(self, interruptor, _p):
+        if not self._pintando:
+            self.ventana.app.activate_action("colores", GLib.Variant("b", interruptor.get_active()))
+
+    def _estilo_cambiado(self, *_):
+        if not self._pintando and self.colores.get_active():
+            estilo = ESTILOS_PALETA[self.estilo.get_selected()][0]
+            self.ventana.app.activate_action("colores-estilo", GLib.Variant("s", estilo))
+
+    # --- greeter
+
+    def pintar_greeter(self, g: dict | None) -> None:
+        self._pintando = True
+        disponible = bool(g and g["available"])
+        self.modo_greeter.set_sensitive(disponible)
+        if g:
+            self.modo_greeter.set_active_name(g["mode"])
+        self.elegir_greeter.set_visible(disponible and g["mode"] == "fija")
+        self._pintando = False
+        if not g:
+            self.info_greeter.set_label("NoHland está parado")
+        elif not disponible:
+            self.info_greeter.set_label("Falta prepararlo una vez, con contraseña:\n"
+                                        "sudo ~/Proyectos/NoHland/tools/preparar-greeter.sh")
+        elif g["mode"] == "no":
+            self.info_greeter.set_label("NoHland no cambia el fondo del inicio de sesión")
+        elif g["mode"] == "fija":
+            self.info_greeter.set_label(Path(g["image"]).name if g["image"] else "Elige una imagen o vídeo")
+        else:
+            self.info_greeter.set_label("El mismo fondo que el escritorio (con vídeos, un fotograma). "
+                                        "Se verá al iniciar sesión")
+        ruta = g.get("last") if g and disponible and g["mode"] != "no" else None
+        if ruta != self._mini_ruta:
+            self._mini_ruta = ruta
+            self.mini_greeter.set_from_paintable(None)
+            if ruta:
+                self.ventana._pedir_miniatura(Path(ruta), lambda f, _o: self.mini_greeter.set_from_paintable(
+                    _textura(f, 96, 54)))
+        self.mini_greeter.set_visible(bool(ruta))
+
+    def _modo_greeter_cambiado(self, *_):
+        modo = self.modo_greeter.get_active_name()
+        if not self._pintando and modo:
+            self.ventana.app.activate_action("greeter-modo", GLib.Variant("s", modo))
+
+    def _elegir_imagen(self):
+        self.popdown()
+        self.ventana.app.elegir_archivo("Imagen para el inicio de sesión",
+                                        lambda ruta: self.ventana.app.activate_action(
+                                            "greeter-imagen", GLib.Variant("s", ruta)))
+
+
 # ------------------------------------------------------------ webs de fondos
 
 class PopoverWebs(Gtk.Popover):
@@ -540,6 +697,10 @@ class Ventana(Adw.ApplicationWindow):
                                          child=Adw.ButtonContent(icon_name="folder-download-symbolic",
                                                                  label="Conseguir fondos"))
         cabecera.pack_end(self.boton_webs)
+        self.popover_escritorio = PopoverEscritorio(self)
+        cabecera.pack_end(Gtk.MenuButton(popover=self.popover_escritorio,
+                                         icon_name="preferences-desktop-appearance-symbolic",
+                                         tooltip_text="Colores del escritorio e inicio de sesión"))
 
         self.aviso = Adw.Banner(title="El daemon de NoHland no está en marcha", button_label="Arrancar")
         self.aviso.set_action_name("app.arrancar-daemon")
@@ -731,6 +892,7 @@ class Ventana(Adw.ApplicationWindow):
         self.portada.mostrar(portada, len(nombres) > 1, e["manual_pause"], sin_daemon=False,
                              hay_video=hay_video, rotacion=e.get("rotation"))
         self._pintar_rotacion(e.get("rotation"))
+        self.popover_escritorio.pintar_greeter(e.get("greeter"))
         # Se pide una vez por fondo; si ffmpeg falla no se reintenta cada 2 s
         if portada and portada["current"] and self.portada.ruta != self._portada_pedida:
             self._portada_pedida = self.portada.ruta
@@ -922,6 +1084,9 @@ class Ventana(Adw.ApplicationWindow):
         item = Gio.MenuItem.new("Sacar de la rotación" if dentro else "Meter en la rotación", None)
         item.set_action_and_target_value("app.rotacion-alternar", GLib.Variant("s", ruta))
         otros.append_item(item)
+        item = Gio.MenuItem.new("Usar en el inicio de sesión", None)
+        item.set_action_and_target_value("app.greeter-imagen", GLib.Variant("s", ruta))
+        otros.append_item(item)
         item = Gio.MenuItem.new("Mostrar en la carpeta", None)
         item.set_action_and_target_value("app.mostrar", GLib.Variant("s", ruta))
         otros.append_item(item)
@@ -947,6 +1112,12 @@ def _duracion(segundos: float) -> str:
         return f"{minutos} min"
     h, m = divmod(minutos, 60)
     return f"{h} h {m} min" if m else f"{h} h"
+
+
+def _noctalia(*args: str) -> None:
+    r = subprocess.run(["noctalia", "msg", *args], capture_output=True, text=True, timeout=15)
+    if r.returncode != 0:
+        raise RuntimeError(r.stdout.strip() or r.stderr.strip() or f"noctalia msg {args[0]} falló")
 
 
 def _describir(m: dict) -> str:
@@ -985,6 +1156,16 @@ class Aplicacion(Adw.Application):
             "poner-en": ("(ss)", self._poner_en),
             "mostrar": ("s", self._mostrar),
             "papelera": ("s", self._papelera),
+            "colores": ("b", self._colores),
+            "colores-estilo": ("s", self._colores_estilo),
+            "noctalia-ajustes": (None, lambda *_: subprocess.Popen(
+                ["noctalia", "msg", "settings-open"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)),
+            "greeter-modo": ("s", lambda _a, p: self.orden(
+                {"cmd": "greeter", "mode": p.get_string()}, "Inicio de sesión: " + {
+                    "escritorio": "como el escritorio", "fija": "imagen fija", "no": "no se toca"}[p.get_string()])),
+            "greeter-imagen": ("s", lambda _a, p: self.orden(
+                {"cmd": "greeter", "mode": "fija", "image": p.get_string()},
+                f"{Path(p.get_string()).name} en el inicio de sesión")),
             "abrir": (None, self._abrir),
             "conseguir": (None, lambda *_: self.ventana.boton_webs.popup()),
             "web": ("s", self._web),
@@ -1057,22 +1238,7 @@ class Aplicacion(Adw.Application):
         self.ventana.elegir_monitor(parametro.get_string() or None)
 
     def _abrir(self, *_):
-        filtro = Gtk.FileFilter(name="Fondos (imágenes, vídeos y GIF)")
-        for ext in sorted(IMAGE_EXT | ANIMATED_EXT):
-            filtro.add_suffix(ext.lstrip("."))
-        filtros = Gio.ListStore.new(Gtk.FileFilter)
-        filtros.append(filtro)
-        dialogo = Gtk.FileDialog(title="Elegir fondo", filters=filtros, default_filter=filtro)
-        if self.ventana.carpeta:
-            dialogo.set_initial_folder(Gio.File.new_for_path(str(self.ventana.carpeta)))
-
-        def elegido(d, resultado):
-            try:
-                fichero = d.open_finish(resultado)
-            except GLib.Error:
-                return  # cancelado
-            self.activate_action("poner", GLib.Variant("s", fichero.get_path()))
-        dialogo.open(self.ventana, None, elegido)
+        self.elegir_archivo("Elegir fondo", lambda ruta: self.activate_action("poner", GLib.Variant("s", ruta)))
 
     def _rotacion_alternar(self, _accion, parametro):
         ruta = parametro.get_string()
@@ -1100,6 +1266,61 @@ class Aplicacion(Adw.Application):
     def _mostrar(self, _accion, parametro):
         Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(
             self.ventana, None, None)
+
+    def _colores(self, _accion, parametro):
+        activar = parametro.get_boolean()
+
+        def cambiar():
+            if activar:
+                fuente, nombre = esquema_noctalia()
+                estilo = nombre if fuente == "wallpaper" else "m3-content"
+                _noctalia("color-scheme-set", "wallpaper", estilo)
+            else:
+                # Vuelve a la paleta fija que tuviera elegida en Noctalia
+                from .doctor import _toml_noctalia
+                fija = _toml_noctalia().get("theme", {}).get("builtin") or "Noctalia"
+                _noctalia("color-scheme-set", "builtin", fija)
+                return fija
+
+        def hecho(r, error):
+            if error:
+                self.ventana.avisar(f"No pude cambiar los colores: {error}")
+            elif activar:
+                # Noctalia necesita un wallpaper-set para tener de donde sacarla
+                self.orden({"cmd": "palette"}, "Los colores siguen al fondo")
+            else:
+                self.ventana.avisar(f"Colores fijos: paleta «{r}» de Noctalia")
+            self.ventana.popover_escritorio.leer_colores()
+        en_hilo(cambiar, hecho)
+
+    def _colores_estilo(self, _accion, parametro):
+        estilo = parametro.get_string()
+
+        def hecho(_r, error):
+            if error:
+                self.ventana.avisar(f"No pude cambiar el estilo: {error}")
+            else:
+                self.orden({"cmd": "palette"}, f"Estilo de colores: {estilo}")
+            self.ventana.popover_escritorio.leer_colores()
+        en_hilo(lambda: _noctalia("color-scheme-set", "wallpaper", estilo), hecho)
+
+    def elegir_archivo(self, titulo: str, al_elegir) -> None:
+        filtro = Gtk.FileFilter(name="Fondos (imágenes, vídeos y GIF)")
+        for ext in sorted(IMAGE_EXT | ANIMATED_EXT):
+            filtro.add_suffix(ext.lstrip("."))
+        filtros = Gio.ListStore.new(Gtk.FileFilter)
+        filtros.append(filtro)
+        dialogo = Gtk.FileDialog(title=titulo, filters=filtros, default_filter=filtro)
+        if self.ventana.carpeta:
+            dialogo.set_initial_folder(Gio.File.new_for_path(str(self.ventana.carpeta)))
+
+        def elegido(d, resultado):
+            try:
+                fichero = d.open_finish(resultado)
+            except GLib.Error:
+                return  # cancelado
+            al_elegir(fichero.get_path())
+        dialogo.open(self.ventana, None, elegido)
 
     def _papelera(self, _accion, parametro):
         ruta = Path(parametro.get_string())
