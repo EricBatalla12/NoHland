@@ -5,6 +5,7 @@ Los errores de config (tipos o expresiones regulares mal escritas) paran el
 daemon con un mensaje claro en vez de ignorarse en silencio.
 """
 
+import json
 import os
 import re
 import tomllib
@@ -90,6 +91,10 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
     if cfg.layer not in ("background", "bottom", "top", "overlay"):
         raise ConfigError(f"video.layer = {cfg.layer!r} no es una capa valida")
     cfg.mpv_options = _get(video, "mpv_options", list, [], "video")
+    for opcion in cfg.mpv_options:
+        # mpvpaper recibe todas las opciones en una cadena y la corta por espacios
+        if not isinstance(opcion, str) or not opcion or any(c.isspace() for c in opcion):
+            raise ConfigError(f"video.mpv_options: {opcion!r} no vale (mpvpaper no admite espacios dentro de una opcion)")
 
     pause = _get(raw, "pause", dict, {}, "")
     cfg.pause_on_fullscreen = _get(pause, "fullscreen", bool, True, "pause")
@@ -105,3 +110,71 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
 
 def directorio_de(cfg: Config, monitor: str) -> Path:
     return cfg.monitor_dirs.get(monitor, cfg.directory)
+
+
+# ------------------------------------------------------------ escritura
+# La usa la ventana de ajustes. tomllib solo lee, asi que aqui hay un
+# serializador minimo para el esquema de lienzo (cadenas, booleanos, listas de
+# cadenas y tablas). Los comentarios del fichero se pierden al guardar.
+
+CABECERA = """\
+# Configuracion de lienzo, guardada desde la ventana de ajustes (lienzo gui).
+# La explicacion de cada clave esta en config.example.toml del repo.
+"""
+
+
+def leer_crudo(path: Path = CONFIG_PATH) -> dict:
+    """El TOML tal cual, sin valores por defecto ({} si no existe)."""
+    if not path.exists():
+        return {}
+    with path.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def _clave(k: str) -> str:
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k, ensure_ascii=False)
+
+
+def _valor(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, str):
+        # Los escapes de JSON (\\ \" \n \uXXXX) son validos en las cadenas
+        # basicas de TOML; asi las regex con \d sobreviven intactas
+        return json.dumps(v, ensure_ascii=False)
+    if isinstance(v, list):
+        if not v:
+            return "[]"
+        return "[\n" + "".join(f"    {_valor(x)},\n" for x in v) + "]"
+    raise TypeError(f"no se puede guardar en TOML: {type(v).__name__}")
+
+
+def _volcar(tabla: dict, prefijo: str, lineas: list[str]) -> None:
+    simples = {k: v for k, v in tabla.items() if not isinstance(v, dict)}
+    if prefijo and (simples or not any(isinstance(v, dict) for v in tabla.values())):
+        lineas.append(f"\n[{prefijo}]")
+    for k, v in simples.items():
+        lineas.append(f"{_clave(k)} = {_valor(v)}")
+    for k, v in tabla.items():
+        if isinstance(v, dict):
+            _volcar(v, f"{prefijo}.{_clave(k)}" if prefijo else _clave(k), lineas)
+
+
+def escribir(raw: dict, path: Path = CONFIG_PATH) -> None:
+    """Guarda la config. Antes de sustituir el fichero comprueba que se lee
+    bien: si no, lanza ConfigError y el fichero viejo queda intacto."""
+    lineas = [CABECERA.rstrip("\n")]
+    _volcar(raw, "", lineas)
+    texto = "\n".join(lineas) + "\n"
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(texto, encoding="utf-8")
+    try:
+        load(tmp)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)

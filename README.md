@@ -23,7 +23,25 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
   Todo por eventos (socket2 de Hyprland y uevents del kernel por netlink):
   sin sondeos, 0 % de CPU en reposo.
 
-## Uso
+## Interfaz
+
+`lienzo gui`, o «lienzo» en el lanzador de Noctalia. Una ventana GTK4 +
+libadwaita que hace todo lo del CLI: cuadrícula con miniaturas de la carpeta
+(clic = ponerlo), «Abrir…» para un archivo de otro sitio, selector de monitor,
+Pausar/Reanudar, Siguiente, estado de cada monitor con los motivos de pausa y
+una ventana de ajustes que edita `config.toml` y reinicia el servicio.
+
+- Coge los colores de la paleta del fondo sola: Noctalia escribe los colores
+  de libadwaita en `~/.config/gtk-4.0/noctalia.css`.
+- Pide el estado cada 2 s solo mientras está abierta.
+- Al guardar los ajustes se pierden los comentarios del `config.toml`, y el
+  reinicio del servicio quita la pausa manual y empieza los vídeos de nuevo.
+- Atajos: Espacio pausa/reanuda, Ctrl+→ siguiente, Ctrl+Q cierra.
+- Cada botón es una acción de la aplicación, así que se puede manejar por
+  D-Bus (así se prueba sin ratón):
+  `gdbus call --session --dest io.github.EricBatalla12.Lienzo --object-path /io/github/EricBatalla12/Lienzo --method org.gtk.Actions.Activate siguiente "[]" "{}"`
+
+## Uso desde la terminal
 
 ```
 lienzo set <archivo>   # pone un fondo en todos los monitores
@@ -32,6 +50,7 @@ lienzo next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabét
 lienzo pause           # pausa manual
 lienzo resume          # quita la pausa manual (la automática sigue mandando)
 lienzo status          # qué suena, si está pausado y por qué (--json)
+lienzo gui             # la ventana
 ```
 
 Logs: `journalctl --user -u lienzo -f`
@@ -44,10 +63,10 @@ systemctl --user enable --now lienzo
 ```
 
 `install.sh` enlaza `bin/lienzo` en `~/.local/bin`, el servicio en
-`~/.config/systemd/user` y copia `config.example.toml` a
+`~/.config/systemd/user`, crea la entrada del lanzador y copia `config.example.toml` a
 `~/.config/lienzo/config.toml` si no existe. Solo usa la biblioteca estándar
 de Python (3.11+ por `tomllib`); en el sistema hacen falta `mpvpaper` y
-`noctalia`.
+`noctalia`, y para la interfaz `python-gobject`, `gtk4` y `libadwaita`.
 
 **Por qué un servicio systemd y no `exec-once`:** la sesión va con UWSM, así
 que `graphical-session.target` ya trae el entorno de Hyprland; systemd además
@@ -57,7 +76,11 @@ reinicia el daemon si cae y manda los logs al journal sin hacer nada más.
 
 | Fichero | Qué hace |
 |---|---|
-| `lienzo/cli.py` | subcomandos; cliente del socket de control |
+| `lienzo/cli.py` | subcomandos |
+| `lienzo/cliente.py` | cliente del socket de control (CLI e interfaz) |
+| `lienzo/gui.py` | ventana principal (GTK4 + libadwaita) |
+| `lienzo/ajustes.py` | ventana de ajustes |
+| `lienzo/miniaturas.py` | miniaturas con ffmpeg, cacheadas en `~/.cache/lienzo/miniaturas` |
 | `lienzo/daemon.py` | bucle asyncio: socket de control + eventos de Hyprland + pausa |
 | `lienzo/hyprland.py` | cliente de `.socket.sock` (consultas) y `.socket2.sock` (eventos) |
 | `lienzo/backends.py` | Noctalia para imágenes, mpvpaper + IPC de mpv para vídeo, fotograma con ffmpeg |

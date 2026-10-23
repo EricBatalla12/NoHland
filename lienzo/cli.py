@@ -3,28 +3,11 @@
 import argparse
 import json
 import os
-import socket
 import sys
 from pathlib import Path
 
 from . import __version__
-from .config import CONTROL_SOCKET
-
-
-def enviar(peticion: dict) -> dict:
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(30)
-            s.connect(str(CONTROL_SOCKET))
-            s.sendall(json.dumps(peticion).encode() + b"\n")
-            datos = b""
-            while trozo := s.recv(65536):
-                datos += trozo
-    except (FileNotFoundError, ConnectionRefusedError):
-        sys.exit("lienzo: el daemon no esta en marcha (systemctl --user start lienzo)")
-    except TimeoutError:
-        sys.exit("lienzo: el daemon no ha respondido en 30 s")
-    return json.loads(datos)
+from .cliente import DaemonParado, enviar
 
 
 def imprimir_estado(e: dict) -> None:
@@ -66,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=f"lienzo {__version__}")
     sub = ap.add_subparsers(dest="orden", required=True, metavar="orden")
     sub.add_parser("daemon", help="arranca el daemon (lo usa el servicio systemd)")
+    sub.add_parser("gui", help="abre la ventana de lienzo")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
@@ -80,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.orden == "daemon":
         from .daemon import main as daemon_main
         return daemon_main()
+    if args.orden == "gui":
+        # Import tardio: el CLI y el daemon no necesitan GTK
+        from .gui import main as gui_main
+        return gui_main()
 
     peticion = {"cmd": args.orden}
     if getattr(args, "monitor", None):
@@ -88,7 +76,10 @@ def main(argv: list[str] | None = None) -> int:
         # La ruta se resuelve aqui: el daemon no comparte el directorio actual
         peticion["path"] = os.path.abspath(args.archivo.expanduser())
 
-    respuesta = enviar(peticion)
+    try:
+        respuesta = enviar(peticion)
+    except DaemonParado as e:
+        sys.exit(f"lienzo: {e}")
     if not respuesta.get("ok"):
         print(f"lienzo: {respuesta.get('error')}", file=sys.stderr)
         return 1

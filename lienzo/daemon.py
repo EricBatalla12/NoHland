@@ -503,6 +503,7 @@ class Daemon:
                          hwdec=info.get("hwdec-current"), mpv_paused=info.get("pause"))
             monitores.append(m)
         return {"monitors": monitores, "palette_monitor": paleta,
+                "directory": str(self.cfg.directory),
                 "manual_pause": self.manual_pause, "on_battery": self.bateria}
 
 

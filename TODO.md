@@ -3,8 +3,14 @@
 Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 
 ## Fase 3 (solo si se pide)
-- Selector visual (Noctalia o rofi con miniaturas).
 - Rotación automática cada X minutos.
+
+## Interfaz
+- Vista previa animada de los vídeos en la cuadrícula.
+- Widget en la barra de Noctalia (plugin en Luau) que abra la ventana.
+- Regla de Hyprland para que la ventana salga flotante y centrada.
+- Recargar la config sin reiniciar el servicio, para que guardar los ajustes
+  no quite la pausa manual ni reinicie los vídeos.
 
 ## Extras que han salido por el camino
 - **Parar en vez de pausar.** mpvpaper en pausa sigue gastando ~2,3 % de un
