@@ -47,7 +47,10 @@ def imprimir_estado(e: dict) -> None:
         if not r["enabled"]:
             print("Rotacion: apagada")
         else:
-            linea = f"Rotacion: cada {r['interval_minutes']:g} min"
+            fuera = len(r.get("excluded", []))
+            linea = f"Rotacion: cada {r['interval_minutes']:g} min · {r.get('order', 'orden')}"
+            if fuera:
+                linea += f" · {fuera} fuera de la rotacion"
             if r["next_in_s"] is not None:
                 m, s = divmod(max(r["next_in_s"], 0), 60)
                 linea += f" · siguiente cambio en {m} min {s:02d} s"
@@ -69,8 +72,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
     sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
     sub.add_parser("resume", help="quita la pausa manual")
-    p_rot = sub.add_parser("rotate", help="enciende o apaga la rotacion automatica")
-    p_rot.add_argument("estado", choices=["on", "off"])
+    p_rot = sub.add_parser(
+        "rotate", help="rotacion automatica",
+        description="on/off la enciende o apaga; every <minutos> cambia el tiempo; order orden|aleatorio; "
+                    "exclude/include <archivo> lo quita o lo vuelve a meter en la rotacion")
+    p_rot.add_argument("accion", choices=["on", "off", "every", "order", "exclude", "include"])
+    p_rot.add_argument("valor", nargs="?")
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
     p_status.add_argument("--json", action="store_true", help="salida en JSON")
     args = ap.parse_args(argv)
@@ -85,7 +92,21 @@ def main(argv: list[str] | None = None) -> int:
 
     peticion = {"cmd": args.orden}
     if args.orden == "rotate":
-        peticion["enabled"] = args.estado == "on"
+        accion, valor = args.accion, args.valor
+        if accion in ("on", "off"):
+            peticion["enabled"] = accion == "on"
+        elif valor is None:
+            ap.error(f"rotate {accion} necesita un valor")
+        elif accion == "every":
+            try:
+                peticion["minutes"] = float(valor.replace(",", "."))
+            except ValueError:
+                ap.error(f"rotate every: {valor!r} no es un numero de minutos")
+        elif accion == "order":
+            peticion["order"] = {"seq": "orden", "random": "aleatorio"}.get(valor, valor)
+        else:
+            clave = "exclude" if accion == "exclude" else "include"
+            peticion[clave] = [os.path.abspath(Path(valor).expanduser())]
     if getattr(args, "monitor", None):
         peticion["monitor"] = args.monitor
     if args.orden == "set":

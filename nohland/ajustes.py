@@ -120,18 +120,6 @@ class DialogoAjustes(Adw.PreferencesDialog):
         grupo.add(self.paleta)
         general.add(grupo)
 
-        grupo = Adw.PreferencesGroup(
-            title="Rotación automática",
-            description="Se enciende y se apaga con el interruptor «Rotación» de la ventana principal. "
-                        "Nunca cambia mientras haya algo en pausa.")
-        minutos = self.crudo.get("rotation", {}).get("interval_minutes", cfg.rotation_minutes)
-        self.intervalo = Adw.SpinRow.new_with_range(1, 1440, 1)
-        self.intervalo.set_title("Cambiar cada")
-        self.intervalo.set_subtitle("minutos")
-        self.intervalo.set_value(max(1, round(minutos)))
-        grupo.add(self.intervalo)
-        general.add(grupo)
-
         grupo = Adw.PreferencesGroup(title="Vídeo")
         self.hwdec = _combo("Decodificación por hardware", DECODIFICADORES, video.get("hwdec", cfg.hwdec))
         grupo.add(self.hwdec)
@@ -229,8 +217,6 @@ class DialogoAjustes(Adw.PreferencesDialog):
         except ValueError as e:
             self.add_toast(Adw.Toast(title=f"Opciones de mpv: {e}"))
             return
-        crudo.setdefault("rotation", {})["interval_minutes"] = int(self.intervalo.get_value())
-
         video = crudo.setdefault("video", {})
         video.update(hwdec=_valor_combo(self.hwdec), layer=_valor_combo(self.capa), mpv_options=opciones)
 

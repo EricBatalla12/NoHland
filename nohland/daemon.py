@@ -12,8 +12,11 @@ en epoll y no gasta CPU.
 
 Cada monitor tiene su fondo y, si es un video, su propio mpvpaper.
 
-Rotacion: con el interruptor encendido, cada `interval_minutes` cada monitor
-pasa al siguiente fondo de su carpeta. Es un unico temporizador (call_at), asi
+Rotacion: con el interruptor encendido, cada N minutos cada monitor pasa a
+otro fondo de su carpeta, en orden o al azar, saltando los que se han
+quitado de la rotacion. Todo eso (encendida, minutos, orden y excluidos) se
+cambia desde la ventana y vive en state.json, no en config.toml: asi cambiarlo
+no obliga a reiniciar el servicio. Es un unico temporizador (call_at), asi
 que en reposo sigue sin haber nada que despierte el proceso. Un monitor en
 pausa no cambia: queda pendiente y cambia cuando lleva GRACIA_ROTACION_S sin
 pausa, para no hacerlo en un alt-tab de dos segundos fuera de un juego. Poner
@@ -29,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import signal
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,8 +95,12 @@ class Guardado:
     monitores: dict[str, Path] = field(default_factory=dict)
     # Para un monitor que se conecta sin fondo propio
     ultimo: Path | None = None
-    # El interruptor de la rotacion automatica
+    # Rotacion automatica: interruptor, minutos (None = el de config.toml),
+    # orden ("orden" o "aleatorio") y fondos que no entran
     rotacion: bool = False
+    rotacion_minutos: float | None = None
+    rotacion_orden: str = "orden"
+    rotacion_excluidos: set[str] = field(default_factory=set)
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -106,6 +114,9 @@ class Guardado:
             monitores={k: Path(v) for k, v in datos.get("monitors", {}).items()},
             ultimo=Path(datos["ultimo"]) if datos.get("ultimo") else None,
             rotacion=bool(datos.get("rotation", False)),
+            rotacion_minutos=datos.get("rotation_minutes"),
+            rotacion_orden=datos.get("rotation_order", "orden"),
+            rotacion_excluidos=set(datos.get("rotation_excluded", [])),
         )
 
     def escribir(self) -> None:
@@ -115,6 +126,9 @@ class Guardado:
             "monitors": {k: str(v) for k, v in self.monitores.items()},
             "ultimo": str(self.ultimo) if self.ultimo else None,
             "rotation": self.rotacion,
+            "rotation_minutes": self.rotacion_minutos,
+            "rotation_order": self.rotacion_orden,
+            "rotation_excluded": sorted(self.rotacion_excluidos),
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -173,7 +187,7 @@ class Daemon:
             await self._restaurar(list(self.pantallas), intentos=20)
 
         if self.guardado.rotacion:
-            log.info("rotacion: encendida, cada %g min", self.cfg.rotation_minutes)
+            log.info("rotacion: encendida, cada %g min", self.minutos_rotacion)
             self._programar_rotacion()
 
         vigilantes = {asyncio.create_task(self._escuchar_hyprland())}
@@ -284,15 +298,39 @@ class Daemon:
             await self._aplicar(asignaciones)
         self._cambio_manual(destinos)
 
-    def _siguientes(self, monitores) -> dict[str, Path]:
-        """El siguiente fondo de la carpeta de cada monitor (sin los de carpeta vacia)."""
+    def _siguientes(self, monitores, rotacion: bool = False) -> dict[str, Path]:
+        """El siguiente fondo de la carpeta de cada monitor (sin los de carpeta vacia).
+
+        Con rotacion=True se saltan los excluidos de la rotacion y se respeta
+        su orden; `next` a mano recorre la carpeta entera en orden.
+        """
         asignaciones = {}
         for nombre in monitores:
             lista = _lista(config.directorio_de(self.cfg, nombre))
+            actual = self.pantallas[nombre].actual
+            if rotacion:
+                candidatos = [f for f in lista if str(f) not in self.guardado.rotacion_excluidos]
+                if self.guardado.rotacion_orden == "aleatorio":
+                    # Al azar, pero nunca el mismo que ya esta puesto
+                    otros = [f for f in candidatos if f != actual] or candidatos
+                    if otros:
+                        asignaciones[nombre] = random.choice(otros)
+                    continue
+                # En orden: el primero de la rotacion que venga despues del
+                # actual en la carpeta, aunque el actual este excluido
+                try:
+                    i = lista.index(actual) + 1
+                except ValueError:
+                    i = 0
+                vuelta = lista[i:] + lista[:i]
+                siguiente = next((f for f in vuelta if f in candidatos), None)
+                if siguiente:
+                    asignaciones[nombre] = siguiente
+                continue
             if not lista:
                 continue
             try:
-                i = lista.index(self.pantallas[nombre].actual) + 1
+                i = lista.index(actual) + 1
             except ValueError:
                 i = 0
             asignaciones[nombre] = lista[i % len(lista)]
@@ -392,7 +430,7 @@ class Daemon:
             self._rotacion_hasta = None
             return
         loop = asyncio.get_running_loop()
-        self._rotacion_hasta = loop.time() + self.cfg.rotation_minutes * 60
+        self._rotacion_hasta = loop.time() + self.minutos_rotacion * 60
         self._rotacion_timer = loop.call_at(self._rotacion_hasta, lambda: self._lanzar(self._toca_rotar()))
 
     def _cambio_manual(self, monitores) -> None:
@@ -402,12 +440,42 @@ class Daemon:
         if self.guardado.rotacion:
             self._programar_rotacion()
 
-    async def poner_rotacion(self, encendida: bool) -> None:
-        self.guardado.rotacion = encendida
-        self.guardado.escribir()
-        self.pendientes.clear()
-        self._programar_rotacion()
-        log.info("rotacion: %s", f"encendida, cada {self.cfg.rotation_minutes:g} min" if encendida else "apagada")
+    @property
+    def minutos_rotacion(self) -> float:
+        return self.guardado.rotacion_minutos or self.cfg.rotation_minutes
+
+    async def poner_rotacion(self, encendida: bool | None = None, minutos: float | None = None,
+                             orden: str | None = None, excluir: list[str] | None = None,
+                             incluir: list[str] | None = None) -> None:
+        """Cambia cualquier ajuste de la rotacion; lo que llegue como None no se toca."""
+        g = self.guardado
+        cambios = []
+        if minutos is not None:
+            if not isinstance(minutos, (int, float)) or isinstance(minutos, bool) or not 0.1 <= minutos <= 7 * 24 * 60:
+                raise ValueError(f"minutos de rotacion no validos: {minutos!r}")
+            g.rotacion_minutos = float(minutos)
+            cambios.append(f"cada {minutos:g} min")
+        if orden is not None:
+            if orden not in ("orden", "aleatorio"):
+                raise ValueError(f"orden de rotacion no valido: {orden!r} (orden o aleatorio)")
+            g.rotacion_orden = orden
+            cambios.append(f"orden {orden}")
+        for ruta in excluir or []:
+            g.rotacion_excluidos.add(str(ruta))
+        for ruta in incluir or []:
+            g.rotacion_excluidos.discard(str(ruta))
+        if excluir or incluir:
+            cambios.append(f"{len(g.rotacion_excluidos)} fuera de la rotacion")
+        if encendida is not None and encendida != g.rotacion:
+            g.rotacion = encendida
+            self.pendientes.clear()
+            cambios.insert(0, f"encendida, cada {self.minutos_rotacion:g} min" if encendida else "apagada")
+        g.escribir()
+        # Un intervalo nuevo o encenderla empiezan la cuenta de cero
+        if encendida is not None or minutos is not None:
+            self._programar_rotacion()
+        if cambios:
+            log.info("rotacion: %s", "; ".join(cambios))
 
     async def _toca_rotar(self) -> None:
         self._programar_rotacion()  # la siguiente cuenta empieza ya
@@ -423,9 +491,13 @@ class Daemon:
             log.info("rotacion: espera hasta que se quite la pausa en %s", ", ".join(esperando))
         if not libres:
             return
-        asignaciones = self._siguientes(libres)
+        asignaciones = self._siguientes(libres, rotacion=True)
+        # Si lo unico que queda en la rotacion es lo que ya suena, no se toca:
+        # volver a ponerlo reiniciaria el video para nada
+        asignaciones = {n: f for n, f in asignaciones.items() if f != self.pantallas[n].actual}
         self.pendientes -= set(libres)
         if not asignaciones:
+            log.info("rotacion: no hay ningun fondo en la rotacion; nada que cambiar")
             return
         log.info("rotacion: toca cambiar en %s", ", ".join(sorted(asignaciones)))
         try:
@@ -584,7 +656,9 @@ class Daemon:
             log.info("pausa manual retirada")
             await self._sincronizar_pausa()
         elif orden == "rotate":
-            await self.poner_rotacion(bool(p.get("enabled")))
+            await self.poner_rotacion(
+                encendida=p.get("enabled"), minutos=p.get("minutes"), orden=p.get("order"),
+                excluir=p.get("exclude"), incluir=p.get("include"))
         elif orden != "status":
             raise ValueError(f"orden desconocida: {orden!r}")
         return {"ok": True, "status": await self.status()}
@@ -616,7 +690,9 @@ class Daemon:
                 "manual_pause": self.manual_pause, "on_battery": self.bateria,
                 "rotation": {
                     "enabled": self.guardado.rotacion,
-                    "interval_minutes": self.cfg.rotation_minutes,
+                    "interval_minutes": self.minutos_rotacion,
+                    "order": self.guardado.rotacion_orden,
+                    "excluded": sorted(self.guardado.rotacion_excluidos),
                     "next_in_s": round(self._rotacion_hasta - asyncio.get_running_loop().time())
                     if self._rotacion_hasta else None,
                     "pending": sorted(self.pendientes),

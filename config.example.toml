@@ -14,9 +14,10 @@ palette_monitor = ""
 # directory = "~/Imágenes/NoHland/vertical"
 
 [rotation]
-# Cada cuantos minutos pasa al siguiente fondo de la carpeta cuando la
-# rotacion esta encendida (se enciende con el interruptor de la ventana o con
-# `nohland rotate on`). No cambia mientras haya algo en pausa: espera.
+# Tiempo de rotacion de partida. Despues se cambia en la ventana (panel de la
+# rotacion) o con `nohland rotate every <minutos>`, y lo que se cambie ahi
+# manda sobre este valor. Tambien desde alli: encenderla, el orden y que
+# fondos entran.
 interval_minutes = 15
 
 [video]

@@ -35,6 +35,10 @@ from .cliente import DaemonParado, enviar  # noqa: E402
 from .config import ANIMATED_EXT, IMAGE_EXT  # noqa: E402
 
 APP_ID = "io.github.EricBatalla12.NoHland"
+# El icono se llama como el id oficial aunque la app corra con otro (pruebas)
+ICONO = "io.github.EricBatalla12.NoHland"
+# Atajos del tiempo de rotacion, en minutos
+PRESETS_ROTACION = [(5, "5 min"), (15, "15 min"), (30, "30 min"), (60, "1 h"), (180, "3 h")]
 # Cada cuanto se pide el estado mientras la ventana esta abierta
 REFRESCO_S = 2
 ALTO_PORTADA = 340
@@ -75,7 +79,17 @@ flowboxchild:focus-visible .tarjeta { outline-color: alpha(@accent_bg_color, 0.6
 .insignia.en-uso { background: @accent_bg_color; color: @accent_fg_color; }
 flowboxchild { padding: 0; border-radius: 18px; background: none; }
 .monitor-fila image { border-radius: 8px; }
-.rotacion { padding: 6px 8px 6px 14px; border-radius: 14px; background: alpha(@window_fg_color, 0.06); }
+.rotacion { padding: 6px 6px 6px 14px; border-radius: 14px; background: alpha(@window_fg_color, 0.06); }
+.titulo-app { font-weight: 800; }
+.boton-tarjeta { margin: 8px; min-width: 34px; min-height: 34px; padding: 0; border-radius: 999px;
+                 background: alpha(black, 0.55); color: white; opacity: 0; transition: opacity 150ms ease; }
+flowboxchild:hover .boton-tarjeta, .boton-tarjeta:checked, .boton-tarjeta:focus-visible { opacity: 1; }
+.boton-tarjeta > button { min-width: 34px; min-height: 34px; padding: 0; border-radius: 999px;
+                          background: none; color: white; }
+.marca-rotacion { margin: 10px; padding: 6px; border-radius: 999px; background: alpha(black, 0.6); color: white; }
+.marca-rotacion.dentro { background: @accent_bg_color; color: @accent_fg_color; }
+.tarjeta.fuera-de-rotacion { opacity: 0.42; }
+.barra-seleccion { padding: 10px 10px 10px 16px; border-radius: 16px; background: alpha(@accent_bg_color, 0.16); }
 """
 
 
@@ -212,9 +226,25 @@ class Tarjeta(Gtk.FlowBoxChild):
         velo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.END, spacing=2)
         velo.add_css_class("tarjeta-velo")
         velo.append(_etiqueta(path.stem, "tarjeta-nombre", xalign=0, ellipsize=Pango.EllipsizeMode.END))
-        velo.append(_etiqueta(f"{NOMBRE_TIPO[self.tipo]} · {path.suffix.lstrip('.').upper()}",
-                              "tarjeta-tipo", xalign=0))
+        self._tipo_texto = f"{NOMBRE_TIPO[self.tipo]} · {path.suffix.lstrip('.').upper()}"
+        self.etiqueta_tipo = _etiqueta(self._tipo_texto, "tarjeta-tipo", xalign=0)
+        velo.append(self.etiqueta_tipo)
         caja.add_overlay(velo)
+
+        # Menu de la tarjeta: boton que aparece al pasar el raton, o clic derecho
+        self.boton_menu = Gtk.MenuButton(icon_name="view-more-symbolic", halign=Gtk.Align.END,
+                                         valign=Gtk.Align.END, tooltip_text="Más opciones")
+        self.boton_menu.add_css_class("boton-tarjeta")
+        caja.add_overlay(self.boton_menu)
+        clic_derecho = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        clic_derecho.connect("pressed", lambda *_: self.boton_menu.popup())
+        self.add_controller(clic_derecho)
+
+        # En el modo «elegir fondos de la rotacion»: dentro o fuera
+        self.marca = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16, visible=False,
+                               halign=Gtk.Align.END, valign=Gtk.Align.END)
+        self.marca.add_css_class("marca-rotacion")
+        caja.add_overlay(self.marca)
 
         if self.tipo != "imagen":
             insignia = Gtk.Box(spacing=4, halign=Gtk.Align.END, valign=Gtk.Align.START)
@@ -239,6 +269,99 @@ class Tarjeta(Gtk.FlowBoxChild):
             self._caja.add_css_class("actual")
         else:
             self._caja.remove_css_class("actual")
+
+    def marcar_rotacion(self, dentro: bool, eligiendo: bool) -> None:
+        self.en_rotacion = dentro
+        self.marca.set_visible(eligiendo)
+        self.boton_menu.set_visible(not eligiendo)
+        self.marca.set_from_icon_name("object-select-symbolic" if dentro else "list-remove-symbolic")
+        if dentro:
+            self.marca.add_css_class("dentro")
+        else:
+            self.marca.remove_css_class("dentro")
+        (self._caja.add_css_class if eligiendo and not dentro else self._caja.remove_css_class)("fuera-de-rotacion")
+        self.etiqueta_tipo.set_label(self._tipo_texto + ("" if dentro else " · fuera de la rotación"))
+
+
+# ------------------------------------------------------------ rotacion
+
+class PopoverRotacion(Gtk.Popover):
+    """Tiempo, orden y fondos de la rotacion automatica."""
+
+    def __init__(self, ventana: "Ventana") -> None:
+        super().__init__()
+        self.ventana = ventana
+        self._pintando = False
+        caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=380,
+                       margin_top=14, margin_bottom=14, margin_start=14, margin_end=14)
+        caja.append(_etiqueta("Rotación automática", "heading", xalign=0))
+
+        caja.append(_etiqueta("Cambiar cada", "caption-heading", xalign=0, margin_top=4))
+        self.presets = Adw.ToggleGroup()
+        for minutos, texto in PRESETS_ROTACION:
+            self.presets.add(Adw.Toggle(name=str(minutos), label=texto))
+        self.presets.connect("notify::active-name", self._preset_elegido)
+        caja.append(self.presets)
+        otro = Gtk.Box(spacing=8)
+        otro.append(_etiqueta("O exactamente", "dim-label", hexpand=True, xalign=0))
+        self.minutos = Gtk.SpinButton.new_with_range(1, 7 * 24 * 60, 1)
+        self.minutos.connect("value-changed", self._minutos_cambiados)
+        otro.append(self.minutos)
+        otro.append(_etiqueta("min", "dim-label"))
+        caja.append(otro)
+
+        caja.append(_etiqueta("Orden", "caption-heading", xalign=0, margin_top=4))
+        self.orden = Adw.ToggleGroup()
+        self.orden.add(Adw.Toggle(name="orden", label="En orden", icon_name="view-list-symbolic"))
+        self.orden.add(Adw.Toggle(name="aleatorio", label="Aleatorio", icon_name="media-playlist-shuffle-symbolic"))
+        self.orden.connect("notify::active-name", self._orden_elegido)
+        caja.append(self.orden)
+
+        caja.append(_etiqueta("Fondos", "caption-heading", xalign=0, margin_top=4))
+        fila = Gtk.Box(spacing=8)
+        self.cuenta = _etiqueta("", "dim-label", hexpand=True, xalign=0, wrap=True)
+        fila.append(self.cuenta)
+        elegir = Gtk.Button(label="Elegir…")
+        elegir.connect("clicked", lambda *_: (self.popdown(),
+                                              ventana.app.activate_action("rotacion-elegir", GLib.Variant("b", True))))
+        fila.append(elegir)
+        caja.append(fila)
+        self.set_child(caja)
+        self._debounce = 0
+
+    def pintar(self, r: dict, dentro: int, total: int) -> None:
+        self._pintando = True
+        minutos = r["interval_minutes"]
+        nombre = str(int(minutos)) if float(minutos).is_integer() else ""
+        self.presets.set_active_name(nombre if any(str(m) == nombre for m, _ in PRESETS_ROTACION) else None)
+        if not self.minutos.has_focus():
+            self.minutos.set_value(minutos)
+        self.orden.set_active_name(r.get("order", "orden"))
+        self.cuenta.set_label(f"{dentro} de {total} fondos de esta carpeta entran en la rotación")
+        self._pintando = False
+
+    def _preset_elegido(self, *_):
+        nombre = self.presets.get_active_name()
+        if self._pintando or not nombre:
+            return
+        self.ventana.app.activate_action("rotacion-minutos", GLib.Variant("d", float(nombre)))
+
+    def _minutos_cambiados(self, boton):
+        if self._pintando:
+            return
+        # Se espera a que deje de pulsar las flechas para mandar una sola orden
+        if self._debounce:
+            GLib.source_remove(self._debounce)
+        def enviar():
+            self._debounce = 0
+            self.ventana.app.activate_action("rotacion-minutos", GLib.Variant("d", boton.get_value()))
+            return False
+        self._debounce = GLib.timeout_add(700, enviar)
+
+    def _orden_elegido(self, *_):
+        nombre = self.orden.get_active_name()
+        if not self._pintando and nombre:
+            self.ventana.app.activate_action("rotacion-orden", GLib.Variant("s", nombre))
 
 
 # ------------------------------------------------------------ webs de fondos
@@ -397,7 +520,10 @@ class Ventana(Adw.ApplicationWindow):
         self._hilos_miniaturas = ThreadPoolExecutor(max_workers=4)
 
         # --- barra de arriba
-        cabecera = Adw.HeaderBar(title_widget=Adw.WindowTitle(title="NoHland"))
+        marca = Gtk.Box(spacing=8)
+        marca.append(Gtk.Image(icon_name=ICONO, pixel_size=22))
+        marca.append(_etiqueta("NoHland", "titulo-app"))
+        cabecera = Adw.HeaderBar(title_widget=marca)
         self.selector_monitor = Adw.ToggleGroup(visible=False, tooltip_text="Monitor al que van los cambios")
         self.selector_monitor.connect("notify::active-name", lambda *_: self._monitor_cambiado())
         cabecera.pack_start(self.selector_monitor)
@@ -454,11 +580,15 @@ class Ventana(Adw.ApplicationWindow):
         self.rotacion_info = _etiqueta("", "dim-label", "caption", xalign=0)
         textos_rot.append(self.rotacion_info)
         rotacion.append(textos_rot)
-        self.rotacion = Gtk.Switch(valign=Gtk.Align.CENTER,
-                                   tooltip_text="Pasar al siguiente fondo cada cierto tiempo (el intervalo, en Ajustes)")
+        self.rotacion = Gtk.Switch(valign=Gtk.Align.CENTER, tooltip_text="Cambiar de fondo solo cada cierto tiempo")
         self._pintando_rotacion = False
         self.rotacion.connect("notify::active", self._rotacion_cambiada)
         rotacion.append(self.rotacion)
+        self.popover_rotacion = PopoverRotacion(self)
+        self.boton_rotacion = Gtk.MenuButton(popover=self.popover_rotacion, icon_name="pan-down-symbolic",
+                                             valign=Gtk.Align.CENTER, tooltip_text="Tiempo, orden y fondos de la rotación")
+        self.boton_rotacion.add_css_class("flat")
+        rotacion.append(self.boton_rotacion)
 
         barra = Gtk.Box(spacing=12)
         for w in (titulo, rotacion, self.filtro, self.busqueda, carpeta):
@@ -487,9 +617,25 @@ class Ventana(Adw.ApplicationWindow):
         self.pila.add_named(self.vacio, "vacio")
         self.pila.add_named(self.sin_resultados, "nada")
 
+        # Modo «elegir fondos de la rotacion»: un clic mete o saca la tarjeta
+        self.eligiendo = False
+        seleccion = Gtk.Box(spacing=8)
+        seleccion.add_css_class("barra-seleccion")
+        seleccion.append(Gtk.Image(icon_name="media-playlist-repeat-symbolic"))
+        self.texto_seleccion = _etiqueta("", hexpand=True, xalign=0, wrap=True)
+        seleccion.append(self.texto_seleccion)
+        for texto, valor in (("Todos", True), ("Ninguno", False)):
+            b = Gtk.Button(label=texto, action_name="app.rotacion-todos", action_target=GLib.Variant("b", valor))
+            b.add_css_class("flat")
+            seleccion.append(b)
+        listo = Gtk.Button(label="Listo", action_name="app.rotacion-elegir", action_target=GLib.Variant("b", False))
+        listo.add_css_class("suggested-action")
+        seleccion.append(listo)
+        self.revelar_seleccion = Gtk.Revealer(child=seleccion, transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+
         caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22,
                        margin_top=8, margin_bottom=32, margin_start=28, margin_end=28)
-        for w in (self.portada, self.lista_monitores, barra, self.pila):
+        for w in (self.portada, self.lista_monitores, barra, self.revelar_seleccion, self.pila):
             caja.append(w)
         desplazable = Gtk.ScrolledWindow(child=Adw.Clamp(child=caja, maximum_size=1600, tightening_threshold=1200),
                                          vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -596,6 +742,7 @@ class Ventana(Adw.ApplicationWindow):
 
     def _pintar_rotacion(self, r: dict | None) -> None:
         self.rotacion.set_sensitive(r is not None)
+        self.boton_rotacion.set_sensitive(r is not None)
         if r is None:
             self.rotacion_info.set_label("NoHland parado")
             return
@@ -603,8 +750,17 @@ class Ventana(Adw.ApplicationWindow):
         self._pintando_rotacion = True
         self.rotacion.set_active(r["enabled"])
         self._pintando_rotacion = False
+        excluidos = set(r.get("excluded", []))
+        for path, tarjeta in self.tarjetas.items():
+            tarjeta.marcar_rotacion(str(path) not in excluidos, self.eligiendo)
+        dentro = sum(1 for p in self.tarjetas if str(p) not in excluidos)
+        self.popover_rotacion.pintar(r, dentro, len(self.tarjetas))
+        self.texto_seleccion.set_label(f"Toca los fondos para meterlos o sacarlos de la rotación · "
+                                       f"{dentro} de {len(self.tarjetas)} dentro")
         cada = _duracion(r["interval_minutes"] * 60)
-        if not r["enabled"]:
+        if dentro == 0 and r["enabled"]:
+            self.rotacion_info.set_label("Ningún fondo en la rotación")
+        elif not r["enabled"]:
             self.rotacion_info.set_label(f"Apagada · cada {cada}")
         elif r["pending"]:
             self.rotacion_info.set_label("Esperando: hay algo en pausa")
@@ -688,11 +844,15 @@ class Ventana(Adw.ApplicationWindow):
             self.tarjetas = {}
             for path in fondos:
                 tarjeta = Tarjeta(path)
+                tarjeta.boton_menu.set_create_popup_func(
+                    lambda boton, t=tarjeta: boton.set_menu_model(self.menu_tarjeta(t)))
                 self.tarjetas[path] = tarjeta
                 self.cuadricula.append(tarjeta)
                 self._pedir_miniatura(path, lambda f, _o, t=tarjeta: t.cubierta.poner(_textura(f)))
         self._filtrar()
         self._marcar_actuales()
+        if self.estado:
+            self._pintar_rotacion(self.estado.get("rotation"))
         return False
 
     def _pasa_filtro(self, tarjeta: Tarjeta) -> bool:
@@ -733,7 +893,45 @@ class Ventana(Adw.ApplicationWindow):
             tarjeta.marcar(path in actuales)
 
     def _tarjeta_pulsada(self, _cuadricula, tarjeta: Tarjeta) -> None:
-        self.app.activate_action("poner", GLib.Variant("s", str(tarjeta.path)))
+        if self.eligiendo:
+            self.app.activate_action("rotacion-alternar", GLib.Variant("s", str(tarjeta.path)))
+        else:
+            self.app.activate_action("poner", GLib.Variant("s", str(tarjeta.path)))
+
+    def elegir_rotacion(self, activo: bool) -> None:
+        self.eligiendo = activo
+        self.revelar_seleccion.set_reveal_child(activo)
+        if self.estado:
+            self._pintar_rotacion(self.estado.get("rotation"))
+
+    def menu_tarjeta(self, tarjeta: Tarjeta) -> Gio.Menu:
+        """El menu se construye al abrirlo: depende de los monitores y de la rotacion."""
+        ruta = str(tarjeta.path)
+        menu = Gio.Menu()
+        poner = Gio.Menu()
+        destinos = [("", "Ponerlo en todos los monitores" if len(self.monitores) > 1 else "Ponerlo de fondo")]
+        if len(self.monitores) > 1:
+            destinos += [(m, f"Ponerlo solo en {m}") for m in self.monitores]
+        for monitor, texto in destinos:
+            item = Gio.MenuItem.new(texto, None)
+            item.set_action_and_target_value("app.poner-en", GLib.Variant("(ss)", (monitor, ruta)))
+            poner.append_item(item)
+        menu.append_section(None, poner)
+        otros = Gio.Menu()
+        dentro = getattr(tarjeta, "en_rotacion", True)
+        item = Gio.MenuItem.new("Sacar de la rotación" if dentro else "Meter en la rotación", None)
+        item.set_action_and_target_value("app.rotacion-alternar", GLib.Variant("s", ruta))
+        otros.append_item(item)
+        item = Gio.MenuItem.new("Mostrar en la carpeta", None)
+        item.set_action_and_target_value("app.mostrar", GLib.Variant("s", ruta))
+        otros.append_item(item)
+        menu.append_section(None, otros)
+        papelera = Gio.Menu()
+        item = Gio.MenuItem.new("Mover a la papelera…", None)
+        item.set_action_and_target_value("app.papelera", GLib.Variant("s", ruta))
+        papelera.append_item(item)
+        menu.append_section(None, papelera)
+        return menu
 
     def _abrir_carpeta(self) -> None:
         if self.carpeta:
@@ -776,6 +974,17 @@ class Aplicacion(Adw.Application):
             "filtro": ("s", lambda _a, p: self.ventana.filtro.set_active_name(p.get_string())),
             "buscar": ("s", lambda _a, p: self.ventana.busqueda.set_text(p.get_string())),
             "rotacion": ("b", self._rotacion),
+            "rotacion-minutos": ("d", lambda _a, p: self.orden(
+                {"cmd": "rotate", "minutes": p.get_double()}, f"La rotación cambia cada {_duracion(p.get_double() * 60)}")),
+            "rotacion-orden": ("s", lambda _a, p: self.orden(
+                {"cmd": "rotate", "order": p.get_string()},
+                "Rotación aleatoria" if p.get_string() == "aleatorio" else "Rotación en orden")),
+            "rotacion-alternar": ("s", self._rotacion_alternar),
+            "rotacion-todos": ("b", self._rotacion_todos),
+            "rotacion-elegir": ("b", lambda _a, p: self.ventana.elegir_rotacion(p.get_boolean())),
+            "poner-en": ("(ss)", self._poner_en),
+            "mostrar": ("s", self._mostrar),
+            "papelera": ("s", self._papelera),
             "abrir": (None, self._abrir),
             "conseguir": (None, lambda *_: self.ventana.boton_webs.popup()),
             "web": ("s", self._web),
@@ -794,6 +1003,7 @@ class Aplicacion(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        Gtk.Window.set_default_icon_name(ICONO)
         css = Gtk.CssProvider()
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
@@ -864,6 +1074,54 @@ class Aplicacion(Adw.Application):
             self.activate_action("poner", GLib.Variant("s", fichero.get_path()))
         dialogo.open(self.ventana, None, elegido)
 
+    def _rotacion_alternar(self, _accion, parametro):
+        ruta = parametro.get_string()
+        excluidos = set((self.ventana.estado or {}).get("rotation", {}).get("excluded", []))
+        if ruta in excluidos:
+            self.orden({"cmd": "rotate", "include": [ruta]}, "")
+        else:
+            self.orden({"cmd": "rotate", "exclude": [ruta]}, "")
+
+    def _rotacion_todos(self, _accion, parametro):
+        rutas = [str(p) for p in self.ventana.tarjetas]
+        if parametro.get_boolean():
+            self.orden({"cmd": "rotate", "include": rutas}, "Todos los fondos en la rotación")
+        else:
+            self.orden({"cmd": "rotate", "exclude": rutas}, "Ningún fondo en la rotación")
+
+    def _poner_en(self, _accion, parametro):
+        monitor, ruta = parametro.unpack()
+        peticion = {"cmd": "set", "path": ruta}
+        if monitor:
+            peticion["monitor"] = monitor
+        self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
+        self.orden(peticion, f"{Path(ruta).name} en {monitor or 'todos los monitores'}")
+
+    def _mostrar(self, _accion, parametro):
+        Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(
+            self.ventana, None, None)
+
+    def _papelera(self, _accion, parametro):
+        ruta = Path(parametro.get_string())
+        dialogo = Adw.AlertDialog(heading="¿Mover a la papelera?",
+                                  body=f"«{ruta.name}» saldrá de la colección. Puedes recuperarlo desde la papelera.")
+        dialogo.add_response("cancelar", "Cancelar")
+        dialogo.add_response("papelera", "Mover a la papelera")
+        dialogo.set_response_appearance("papelera", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialogo.set_default_response("cancelar")
+        dialogo.set_close_response("cancelar")
+
+        def respuesta(_d, r):
+            if r != "papelera":
+                return
+            try:
+                Gio.File.new_for_path(str(ruta)).trash(None)
+                self.ventana.avisar(f"{ruta.name} movido a la papelera")
+            except GLib.Error as e:
+                self.ventana.avisar(f"No pude moverlo a la papelera: {e.message}")
+        dialogo.connect("response", respuesta)
+        dialogo.present(self.ventana)
+
     def _rotacion(self, _accion, parametro):
         encendida = parametro.get_boolean()
         self.orden({"cmd": "rotate", "enabled": encendida},
@@ -885,7 +1143,7 @@ class Aplicacion(Adw.Application):
 
     def _acerca(self, *_):
         Adw.AboutDialog(
-            application_name="NoHland", application_icon="preferences-desktop-wallpaper",
+            application_name="NoHland", application_icon=ICONO,
             version=__version__, developer_name="EricBatalla12",
             comments="Fondos de pantalla animados hechos a medida para Noctalia + Hyprland.",
             website="https://github.com/EricBatalla12/NoHland",

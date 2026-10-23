@@ -25,7 +25,11 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
   Todo por eventos (socket2 de Hyprland y uevents del kernel por netlink):
   sin sondeos, 0 % de CPU en reposo.
 - **Rotación automática** (interruptor en la ventana o `nohland rotate on`):
-  cada `interval_minutes` cada monitor pasa al siguiente fondo de su carpeta.
+  cada N minutos cada monitor pasa a otro fondo de su carpeta, en orden o al
+  azar, solo entre los que estén en la rotación. El tiempo, el orden y qué
+  fondos entran se cambian en la ventana sin reiniciar nada y se guardan en
+  `state.json` (`[rotation] interval_minutes` de config.toml es solo el
+  tiempo de partida).
   Un monitor en pausa no cambia: queda pendiente y cambia cuando lleva 30 s sin
   pausa, para no recolorear el escritorio en mitad de un juego ni en un alt-tab.
   Elegir un fondo a mano reinicia la cuenta. Es un único temporizador, así que
@@ -44,9 +48,13 @@ libadwaita que hace todo lo del CLI:
   El fondo en uso lleva la etiqueta «EN USO».
 - **Varios monitores**: selector en la barra y una fila por monitor. Con un
   solo monitor no aparece.
-- **Rotación**: interruptor junto a la colección con el intervalo y cuánto
-  falta; la portada muestra «Cambia en X min». El intervalo se cambia en
-  Ajustes.
+- **Rotación**: interruptor junto a la colección y un panel con el tiempo
+  (5 min, 15 min, 30 min, 1 h, 3 h o el que quieras), el orden (en orden o
+  aleatorio) y «Elegir…», que pone la colección en modo selección: un clic
+  mete o saca cada fondo de la rotación. La portada muestra «Cambia en X min».
+- **Menú de cada tarjeta** (botón ⋮ al pasar el ratón, o clic derecho):
+  ponerlo en todos los monitores o en uno, meterlo o sacarlo de la rotación,
+  mostrarlo en la carpeta o moverlo a la papelera (pide confirmación).
 - **Conseguir fondos**: botón con enlaces a Wallhaven, Wallpaper Abyss,
   MoeWalls, MotionBGs y el Workshop de Wallpaper Engine. Solo abre la web en el
   navegador; lo que descargues en la carpeta aparece solo en la colección.
@@ -72,7 +80,10 @@ nohland next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabé
 nohland pause           # pausa manual
 nohland resume          # quita la pausa manual (la automática sigue mandando)
 nohland status          # qué suena, si está pausado y por qué (--json)
-nohland rotate on|off   # rotación automática (el intervalo, en config.toml)
+nohland rotate on|off   # rotación automática
+nohland rotate every 30 # cada 30 minutos
+nohland rotate order aleatorio   # o «orden»
+nohland rotate exclude <archivo> # sacarlo de la rotación (include lo vuelve a meter)
 nohland gui             # la ventana
 ```
 
@@ -94,6 +105,12 @@ de Python (3.11+ por `tomllib`); en el sistema hacen falta `mpvpaper` y
 **Por qué un servicio systemd y no `exec-once`:** la sesión va con UWSM, así
 que `graphical-session.target` ya trae el entorno de Hyprland; systemd además
 reinicia el daemon si cae y manda los logs al journal sin hacer nada más.
+
+## Icono
+
+`data/io.github.EricBatalla12.NoHland.svg`: un paisaje nocturno (la noche de
+Noctalia) dentro de un marco con el degradado cian-verde de los bordes de
+Hyprland. `install.sh` lo enlaza en `~/.local/share/icons/hicolor`.
 
 ## Estructura
 
