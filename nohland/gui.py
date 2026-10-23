@@ -90,6 +90,22 @@ def tipo_de(path: Path) -> str | None:
 
 
 NOMBRE_TIPO = {"imagen": "Imagen", "video": "Vídeo", "gif": "GIF"}
+# Webs para conseguir fondos, en el boton «Conseguir fondos». Solo enlaces:
+# NoHland no descarga nada por su cuenta.
+SITIOS = [
+    ("Wallhaven", "Imágenes en alta resolución de anime y juegos, con filtro de contenido apto",
+     "https://wallhaven.cc/search?categories=010&purity=100&sorting=toplist&atleast=1920x1080&ratios=16x9",
+     "image-x-generic-symbolic"),
+    ("Wallpaper Abyss", "Imágenes · catálogo enorme por serie y por juego",
+     "https://wall.alphacoders.com/", "image-x-generic-symbolic"),
+    ("MoeWalls", "Fondos animados de anime y juegos, en mp4",
+     "https://moewalls.com/", "camera-video-symbolic"),
+    ("MotionBGs", "Fondos animados en mp4, por categorías",
+     "https://motionbgs.com/", "camera-video-symbolic"),
+    ("Wallpaper Engine", "Workshop de Steam · en NoHland solo sirven los de tipo Vídeo",
+     "https://steamcommunity.com/app/431960/workshop/", "applications-games-symbolic"),
+]
+
 ICONO_TIPO = {"imagen": "image-x-generic-symbolic", "video": "camera-video-symbolic", "gif": "camera-video-symbolic"}
 
 
@@ -224,6 +240,49 @@ class Tarjeta(Gtk.FlowBoxChild):
             self._caja.remove_css_class("actual")
 
 
+# ------------------------------------------------------------ webs de fondos
+
+class PopoverWebs(Gtk.Popover):
+    """Lista de webs de fondos y recordatorio de donde guardar lo descargado."""
+
+    def __init__(self, ventana: "Ventana") -> None:
+        super().__init__()
+        self.ventana = ventana
+        caja = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                       margin_top=12, margin_bottom=12, margin_start=12, margin_end=12, width_request=440)
+        caja.append(_etiqueta("Conseguir fondos", "heading", xalign=0))
+
+        lista = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        lista.add_css_class("boxed-list")
+        for nombre, texto, url, icono in SITIOS:
+            fila = Adw.ActionRow(title=nombre, subtitle=GLib.markup_escape_text(texto),
+                                 activatable=True, tooltip_text=url)
+            fila.add_prefix(Gtk.Image(icon_name=icono))
+            fila.add_suffix(Gtk.Image(icon_name="adw-external-link-symbolic"))
+            fila.connect("activated", lambda _f, u=url: self._abrir(u))
+            lista.append(fila)
+        caja.append(lista)
+
+        # Lo que se guarde en la carpeta aparece solo: la ventana la vigila
+        self.nota = _etiqueta("", "dim-label", "caption", xalign=0, wrap=True, max_width_chars=50)
+        caja.append(self.nota)
+        carpeta = Gtk.Button(halign=Gtk.Align.START,
+                             child=Adw.ButtonContent(icon_name="folder-open-symbolic", label="Abrir la carpeta"))
+        carpeta.connect("clicked", lambda *_: (self.popdown(), ventana._abrir_carpeta()))
+        caja.append(carpeta)
+        self.set_child(caja)
+        self.connect("show", lambda *_: self._actualizar_nota())
+
+    def _actualizar_nota(self) -> None:
+        carpeta = str(self.ventana.carpeta or "").replace(str(Path.home()), "~", 1)
+        self.nota.set_label(f"Guarda lo que descargues en {carpeta}: aparece solo en la colección. "
+                            "De Wallpaper Engine, enlaza el .mp4 del fondo en esa carpeta.")
+
+    def _abrir(self, url: str) -> None:
+        self.popdown()
+        self.ventana.app.activate_action("web", GLib.Variant("s", url))
+
+
 # ------------------------------------------------------------ portada
 
 class Portada(Gtk.Overlay):
@@ -344,6 +403,11 @@ class Ventana(Adw.ApplicationWindow):
         abrir = Gtk.Button(action_name="app.abrir", tooltip_text="Poner un archivo de cualquier carpeta",
                            child=Adw.ButtonContent(icon_name="document-open-symbolic", label="Abrir…"))
         cabecera.pack_end(abrir)
+        self.boton_webs = Gtk.MenuButton(popover=PopoverWebs(self),
+                                         tooltip_text="Webs donde descargar fondos de anime y juegos",
+                                         child=Adw.ButtonContent(icon_name="folder-download-symbolic",
+                                                                 label="Conseguir fondos"))
+        cabecera.pack_end(self.boton_webs)
 
         self.aviso = Adw.Banner(title="El daemon de NoHland no está en marcha", button_label="Arrancar")
         self.aviso.set_action_name("app.arrancar-daemon")
@@ -391,6 +455,10 @@ class Ventana(Adw.ApplicationWindow):
                                     title="No hay fondos en esta carpeta",
                                     description="Copia imágenes, mp4, webm o gif en ella, "
                                                 "o usa «Abrir…» para elegir un archivo de otro sitio.")
+        conseguir = Gtk.Button(label="Conseguir fondos", action_name="app.conseguir", halign=Gtk.Align.CENTER)
+        conseguir.add_css_class("pill")
+        conseguir.add_css_class("suggested-action")
+        self.vacio.set_child(conseguir)
         self.sin_resultados = Adw.StatusPage(icon_name="edit-find-symbolic", title="Nada coincide",
                                              description="Prueba con otro filtro o búsqueda.")
         self.pila = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
@@ -652,6 +720,8 @@ class Aplicacion(Adw.Application):
             "filtro": ("s", lambda _a, p: self.ventana.filtro.set_active_name(p.get_string())),
             "buscar": ("s", lambda _a, p: self.ventana.busqueda.set_text(p.get_string())),
             "abrir": (None, self._abrir),
+            "conseguir": (None, lambda *_: self.ventana.boton_webs.popup()),
+            "web": ("s", self._web),
             "ajustes": (None, self._ajustes),
             "acerca": (None, self._acerca),
             "arrancar-daemon": (None, self._arrancar_daemon),
@@ -736,6 +806,16 @@ class Aplicacion(Adw.Application):
                 return  # cancelado
             self.activate_action("poner", GLib.Variant("s", fichero.get_path()))
         dialogo.open(self.ventana, None, elegido)
+
+    def _web(self, _accion, parametro):
+        url = parametro.get_string()
+
+        def abierto(lanzador, resultado):
+            try:
+                lanzador.launch_finish(resultado)
+            except GLib.Error as e:
+                self.ventana.avisar(f"No pude abrir el navegador: {e.message}")
+        Gtk.UriLauncher(uri=url).launch(self.ventana, None, abierto)
 
     def _ajustes(self, *_):
         from .ajustes import DialogoAjustes

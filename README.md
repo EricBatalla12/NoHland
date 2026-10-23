@@ -37,6 +37,9 @@ libadwaita que hace todo lo del CLI:
   El fondo en uso lleva la etiqueta «EN USO».
 - **Varios monitores**: selector en la barra y una fila por monitor. Con un
   solo monitor no aparece.
+- **Conseguir fondos**: botón con enlaces a Wallhaven, Wallpaper Abyss,
+  MoeWalls, MotionBGs y el Workshop de Wallpaper Engine. Solo abre la web en el
+  navegador; lo que descargues en la carpeta aparece solo en la colección.
 - «Abrir…» para un archivo de otra carpeta, y en el menú, Ajustes (edita
   `config.toml` y reinicia el servicio) y Acerca de.
 
