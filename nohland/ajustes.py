@@ -21,10 +21,10 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 from . import config  # noqa: E402
 
 DECODIFICADORES = [
-    ("nvdec", "nvdec — NVIDIA, recomendado"),
+    ("auto-safe", "auto-safe — la elige mpv"),
+    ("nvdec", "nvdec — NVIDIA, la que menos gasta"),
     ("vaapi", "vaapi"),
     ("vulkan", "vulkan"),
-    ("auto", "auto — que elija mpv"),
     ("no", "no — por CPU"),
 ]
 CAPAS = [

@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="orden", required=True, metavar="orden")
     sub.add_parser("daemon", help="arranca el daemon (lo usa el servicio systemd)")
     sub.add_parser("gui", help="abre la ventana de NoHland")
+    sub.add_parser("doctor", help="revisa que el equipo tenga lo que NoHland necesita")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
@@ -85,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.orden == "daemon":
         from .daemon import main as daemon_main
         return daemon_main()
+    if args.orden == "doctor":
+        from .doctor import main as doctor_main
+        return doctor_main()
     if args.orden == "gui":
         # Import tardio: el CLI y el daemon no necesitan GTK
         from .gui import main as gui_main

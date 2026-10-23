@@ -7,7 +7,8 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 - **Imágenes** (png, jpg, webp, jxl, avif…): las dibuja Noctalia con su
   transición (`noctalia msg wallpaper-set`), que de paso regenera la paleta.
 - **Vídeo (mp4, webm) y GIF**: mpvpaper en la capa `bottom` (encima del fondo
-  de Noctalia y debajo de las ventanas), sin audio y con `hwdec=nvdec`.
+  de Noctalia y debajo de las ventanas), sin audio y con decodificación por
+  hardware (`auto-safe`, o `nvdec` fijo en NVIDIA).
 - **Paleta**: con un vídeo, ffmpeg saca un fotograma (al 25 % de la duración)
   y Noctalia lo recibe como fondo de ese monitor, debajo de mpvpaper: de ahí
   salen los colores y lo que ve la pantalla de bloqueo. Los fotogramas se
@@ -91,20 +92,83 @@ Logs: `journalctl --user -u nohland -f`
 
 ## Instalación
 
+### Requisitos
+
+NoHland está hecho para **Hyprland + Noctalia** y no funciona sin ellos.
+
+| Qué | Para qué | Paquete (CachyOS / Arch) |
+|---|---|---|
+| Hyprland | el escritorio; NoHland escucha sus eventos | `hyprland` |
+| Noctalia 5 (la nativa, no la de Quickshell) | dibuja las imágenes y saca la paleta | `noctalia` (Arch: AUR) |
+| mpvpaper | fondos animados | `mpvpaper` (Arch: AUR) |
+| ffmpeg | miniaturas y fotograma de los vídeos | `ffmpeg` |
+| Python 3.11+ | todo NoHland (solo biblioteca estándar) | `python` |
+| GTK 4.12+, libadwaita 1.7+ y PyGObject | solo la ventana (`nohland gui`) | `gtk4 libadwaita python-gobject` |
+
+En Noctalia, el fondo tiene que estar activado (`[wallpaper] enabled = true`,
+lo normal) y, para que los colores sigan al fondo, `[theme] source = "wallpaper"`.
+
+Funciona con cualquier gráfica: la decodificación por defecto es `auto-safe`,
+que mpv resuelve sola (en NVIDIA acaba en nvdec). Con NVIDIA se puede fijar
+`nvdec` en Ajustes, que en las pruebas fue lo que menos CPU gastó.
+
+### Pasos
+
 ```
+git clone https://github.com/EricBatalla12/NoHland ~/Proyectos/NoHland
+cd ~/Proyectos/NoHland
 ./install.sh
 systemctl --user enable --now nohland
 ```
 
-`install.sh` enlaza `bin/nohland` en `~/.local/bin`, el servicio en
-`~/.config/systemd/user`, crea la entrada del lanzador y copia `config.example.toml` a
-`~/.config/nohland/config.toml` si no existe. Solo usa la biblioteca estándar
-de Python (3.11+ por `tomllib`); en el sistema hacen falta `mpvpaper` y
-`noctalia`, y para la interfaz `python-gobject`, `gtk4` y `libadwaita`.
+(El repo es privado: hace falta que su dueño te dé acceso. Con acceso, también
+vale `gh repo clone EricBatalla12/NoHland`.)
 
-**Por qué un servicio systemd y no `exec-once`:** la sesión va con UWSM, así
-que `graphical-session.target` ya trae el entorno de Hyprland; systemd además
-reinicia el daemon si cae y manda los logs al journal sin hacer nada más.
+`install.sh` no instala paquetes ni pide contraseña. Primero comprueba los
+requisitos y, si falta algo imprescindible, dice qué y cómo conseguirlo, sin
+tocar nada (`--forzar` lo instala igualmente). Después enlaza `bin/nohland` en
+`~/.local/bin`, el servicio en `~/.config/systemd/user` y el icono en el tema
+hicolor, crea la entrada del lanzador, copia `config.example.toml` a
+`~/.config/nohland/config.toml` si no hay ninguna y termina con
+`nohland doctor`.
+
+La carpeta de fondos por defecto es `NoHland` dentro de la carpeta de imágenes
+del sistema (`~/Imágenes/NoHland`, `~/Pictures/NoHland`... según el idioma). Se
+crea sola al arrancar.
+
+Para actualizar: `git pull` y `systemctl --user restart nohland` (vuelve a pasar
+`./install.sh` si cambian el icono o la entrada del lanzador).
+
+### Comprobar el equipo
+
+```
+nohland doctor
+```
+
+Revisa Hyprland, Noctalia (versión, que esté en marcha, que su fondo esté
+activado y de dónde saca la paleta), mpvpaper, ffmpeg, la decodificación, la
+interfaz, el servicio y la carpeta de fondos, y dice cómo arreglar lo que
+falle. No cambia nada.
+
+### Sin UWSM
+
+El servicio arranca con `graphical-session.target`, que levanta UWSM con el
+entorno de Hyprland ya cargado. Si inicias Hyprland sin UWSM, ese target no se
+activa y systemd no conoce la sesión (`nohland doctor` lo detecta). En ese
+caso, arráncalo desde el autostart de Hyprland:
+
+```
+# hyprland.conf
+exec-once = dbus-update-activation-environment --systemd --all && systemctl --user start nohland
+```
+
+```lua
+-- config de Hyprland en Lua
+hl.exec_cmd("dbus-update-activation-environment --systemd --all && systemctl --user start nohland")
+```
+
+**Por qué un servicio systemd y no `exec-once` a secas:** systemd reinicia el
+daemon si cae y manda los logs al journal sin hacer nada más.
 
 ## Icono
 

@@ -1,12 +1,18 @@
-# Servicio de usuario. Va atado a graphical-session.target, que UWSM levanta
-# con el entorno de Hyprland ya importado (HYPRLAND_INSTANCE_SIGNATURE,
+# Servicio de usuario. Con UWSM arranca solo con graphical-session.target, que
+# ya trae el entorno de Hyprland importado (HYPRLAND_INSTANCE_SIGNATURE,
 # WAYLAND_DISPLAY); si la sesion cae, el servicio cae con ella.
+#
+# Sin UWSM ese target no se activa: entonces lo arranca el autostart de
+# Hyprland despues de importar el entorno (ver README, «Sin UWSM»). Por eso no
+# hay Requisite=graphical-session.target, que impediria arrancarlo asi.
 [Unit]
 Description=NoHland: gestor de fondos de pantalla
-Documentation=file://%h/Proyectos/NoHland/README.md
+Documentation=https://github.com/EricBatalla12/NoHland
 PartOf=graphical-session.target
 After=graphical-session.target
-Requisite=graphical-session.target
+# Fuera de Hyprland el daemon sale con error: que no se reintente sin fin
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple

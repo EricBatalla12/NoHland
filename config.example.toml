@@ -2,7 +2,9 @@
 # Todas las claves son opcionales; lo que falte toma el valor de aqui.
 
 # Carpeta de la que tira `nohland next` (sin subcarpetas, orden alfabetico).
-directory = "~/Imágenes/NoHland"
+# Por defecto, NoHland dentro de la carpeta de imagenes del sistema
+# (~/Imágenes/NoHland, ~/Pictures/NoHland...). Se crea sola si no existe.
+# directory = "~/Imágenes/NoHland"
 
 # Monitor cuyo fondo da los colores a Noctalia. Vacio = el primero de
 # Hyprland (id mas bajo). Con un video, la paleta sale de un fotograma suyo.
@@ -21,9 +23,11 @@ palette_monitor = ""
 interval_minutes = 15
 
 [video]
-# Decodificacion por hardware de mpv. En la RTX 5070 con el driver 615
-# funcionan nvdec (CUDA) y vulkan. "no" la desactiva.
-hwdec = "nvdec"
+# Decodificacion por hardware de mpv. "auto-safe" elige sola lo que funciona
+# con mpvpaper (en NVIDIA acaba en nvdec; en AMD/Intel, normalmente vaapi).
+# Con NVIDIA puedes fijar "nvdec": fue lo que menos CPU gasto en las pruebas.
+# "no" la desactiva.
+hwdec = "auto-safe"
 # Capa layer-shell de mpvpaper. "bottom" queda encima del fondo que dibuja
 # Noctalia (capa background) y debajo de las ventanas.
 layer = "bottom"

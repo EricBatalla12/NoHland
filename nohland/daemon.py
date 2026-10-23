@@ -173,7 +173,13 @@ class Daemon:
             loop.add_signal_handler(sig, self._stop.set)
 
         if not self.cfg.directory.is_dir():
-            log.warning("la carpeta de fondos %s no existe", self.cfg.directory)
+            # En una instalacion nueva aun no existe: se crea para que la
+            # ventana y `nohland next` tengan donde mirar
+            try:
+                self.cfg.directory.mkdir(parents=True)
+                log.info("carpeta de fondos creada: %s", self.cfg.directory)
+            except OSError as e:
+                log.warning("la carpeta de fondos %s no existe y no pude crearla: %s", self.cfg.directory, e)
 
         for m in await self.hypr.query("monitors"):
             self.pantallas[m["name"]] = Pantalla(m["name"], m["id"])

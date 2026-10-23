@@ -24,7 +24,32 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "nohland"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".jxl", ".bmp", ".avif", ".heic", ".heif"}
 ANIMATED_EXT = {".mp4", ".webm", ".gif"}
 
-DEFAULT_DIRECTORY = "~/Imágenes/NoHland"
+
+
+def carpeta_imagenes() -> Path:
+    """La carpeta de imagenes del usuario segun xdg-user-dirs (~/Imágenes,
+    ~/Pictures...), o ~/Pictures si el sistema no la define."""
+    dirs = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "user-dirs.dirs"
+    try:
+        for linea in dirs.read_text().splitlines():
+            if linea.startswith("XDG_PICTURES_DIR="):
+                valor = linea.split("=", 1)[1].strip().strip('"')
+                return Path(valor.replace("$HOME", str(HOME))).expanduser()
+    except OSError:
+        pass
+    return HOME / "Pictures"
+
+
+def _con_tilde(ruta: Path) -> str:
+    """~/... en vez de /home/usuario/..., como se escribe en la config."""
+    try:
+        return "~/" + str(ruta.relative_to(HOME))
+    except ValueError:
+        return str(ruta)
+
+
+# Por defecto, una carpeta NoHland dentro de la de imagenes del sistema
+DEFAULT_DIRECTORY = _con_tilde(carpeta_imagenes() / "NoHland")
 
 # Se comparan con re.search contra la clase y la clase inicial de la ventana
 # activa, sin distinguir mayusculas.
@@ -43,7 +68,9 @@ class ConfigError(Exception):
 @dataclass
 class Config:
     directory: Path = field(default_factory=lambda: Path(DEFAULT_DIRECTORY).expanduser())
-    hwdec: str = "nvdec"
+    # auto-safe: mpv prueba lo que haya y descarta lo que no va con la salida
+    # OpenGL de mpvpaper (comprobado: en NVIDIA descarta vulkan y elige nvdec)
+    hwdec: str = "auto-safe"
     layer: str = "bottom"
     mpv_options: list[str] = field(default_factory=list)
     pause_on_fullscreen: bool = True
