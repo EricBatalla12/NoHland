@@ -1,16 +1,21 @@
 """El daemon: un bucle asyncio que solo se despierta cuando pasa algo.
 
 Fuentes de eventos, ninguna sondeada:
-  - socket2 de Hyprland  -> recalcula si hay que pausar por juego/pantalla completa
+  - socket2 de Hyprland  -> pantalla completa, ventana activa, monitores que
+                             aparecen o desaparecen
+  - uevents del kernel    -> enchufar o desenchufar el portatil
   - socket de control     -> ordenes del CLI (set, next, pause, resume, status)
-  - fin del proceso mpvpaper
+  - fin de un proceso mpvpaper
 
 En reposo no hay temporizadores vivos, asi que el proceso se queda bloqueado
 en epoll y no gasta CPU.
 
-Pausa: hay dos motivos que se suman. La pausa manual (lienzo pause/resume) y
-la automatica (lista de razones calculada desde Hyprland). El video esta
-pausado si hay cualquiera de las dos; `resume` solo quita la manual.
+Cada monitor tiene su fondo y, si es un video, su propio mpvpaper.
+
+Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
+manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
+ventana a pantalla completa en el workspace visible de ESE monitor). `resume`
+solo quita la pausa manual.
 """
 
 import asyncio
@@ -18,9 +23,10 @@ import json
 import logging
 import os
 import signal
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import backends, config
+from . import backends, config, energia
 from .backends import BackendError, MpvPaper
 from .config import ANIMATED_EXT, CONTROL_SOCKET, IMAGE_EXT, RUNTIME_DIR, STATE_PATH, Config
 from .hyprland import Hyprland, HyprlandError
@@ -34,6 +40,7 @@ EVENTOS_RELEVANTES = {
     "openwindow", "closewindow", "movewindowv2", "activespecialv2",
     "monitoraddedv2", "monitorremovedv2", "changefloatingmode",
 }
+EVENTOS_MONITOR = {"monitoraddedv2", "monitorremovedv2"}
 # Los eventos llegan en rafagas (cerrar una ventana dispara tres o cuatro).
 # Se espera este margen y se evalua una sola vez.
 DEBOUNCE_S = 0.15
@@ -50,15 +57,64 @@ def tipo_de(path: Path) -> str | None:
     return None
 
 
+def animado(path: Path) -> bool:
+    return tipo_de(path) in ("video", "gif")
+
+
+@dataclass
+class Pantalla:
+    """Un monitor conectado y lo que se ve en el."""
+    nombre: str
+    id: int
+    actual: Path | None = None
+    player: MpvPaper | None = None
+    # Lo que tiene Noctalia en este monitor: el fondo o el fotograma del video
+    imagen_noctalia: Path | None = None
+    # Razon de pausa propia de este monitor (ventana a pantalla completa)
+    pantalla_completa: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class Guardado:
+    """Lo que sobrevive a un reinicio, en ~/.local/state/lienzo/state.json."""
+    # Ultimo fondo de cada monitor, tambien de los que ahora no estan conectados
+    monitores: dict[str, Path] = field(default_factory=dict)
+    # Para un monitor que se conecta sin fondo propio
+    ultimo: Path | None = None
+
+    @classmethod
+    def leer(cls) -> "Guardado":
+        try:
+            datos = json.loads(STATE_PATH.read_text())
+        except (OSError, ValueError):
+            return cls()
+        if "current" in datos:  # formato de la fase 1: un fondo para todos
+            return cls(ultimo=Path(datos["current"]))
+        return cls(
+            monitores={k: Path(v) for k, v in datos.get("monitors", {}).items()},
+            ultimo=Path(datos["ultimo"]) if datos.get("ultimo") else None,
+        )
+
+    def escribir(self) -> None:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({
+            "monitors": {k: str(v) for k, v in self.monitores.items()},
+            "ultimo": str(self.ultimo) if self.ultimo else None,
+        }, ensure_ascii=False, indent=1))
+        os.replace(tmp, STATE_PATH)
+
+
 class Daemon:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.hypr = Hyprland()
-        self.current: Path | None = None
-        self.player: MpvPaper | None = None
+        self.pantallas: dict[str, Pantalla] = {}
+        self.guardado = Guardado.leer()
         self.manual_pause = False
-        self.auto_reasons: list[str] = []
-        self.error: str | None = None
+        self.juego: str | None = None
+        self.bateria = False
         self._lock = asyncio.Lock()
         self._debounce: asyncio.TimerHandle | None = None
         self._stop = asyncio.Event()
@@ -86,149 +142,253 @@ class Daemon:
         if not self.cfg.directory.is_dir():
             log.warning("la carpeta de fondos %s no existe", self.cfg.directory)
 
+        for m in await self.hypr.query("monitors"):
+            self.pantallas[m["name"]] = Pantalla(m["name"], m["id"])
+        log.info("monitores: %s; paleta desde %s", ", ".join(self.pantallas), self.monitor_paleta())
+
+        if self.cfg.pause_on_battery:
+            self._actualizar_bateria(inicial=True)
         await self._evaluar_pausa()
-        await self._restaurar()
-        eventos = asyncio.create_task(self._escuchar_hyprland())
+        # Al iniciar sesion Noctalia puede tardar en aparecer: hasta 20 s
+        async with self._lock:
+            await self._restaurar(list(self.pantallas), intentos=20)
+
+        vigilantes = {asyncio.create_task(self._escuchar_hyprland())}
+        if self.cfg.pause_on_battery:
+            vigilantes.add(asyncio.create_task(self._escuchar_energia()))
 
         log.info("listo; control en %s", CONTROL_SOCKET)
         parada = asyncio.create_task(self._stop.wait())
-        hecho, _ = await asyncio.wait({eventos, parada}, return_when=asyncio.FIRST_COMPLETED)
+        hecho, _ = await asyncio.wait(vigilantes | {parada}, return_when=asyncio.FIRST_COMPLETED)
 
         server.close()
-        eventos.cancel()
-        if self.player:
-            # Se suelta antes de pararlo para que _vigilar no lo cuente como
-            # una caida inesperada
-            player, self.player = self.player, None
-            await player.stop()
+        for t in vigilantes:
+            t.cancel()
+        for p in self.pantallas.values():
+            await self._soltar_player(p)
         CONTROL_SOCKET.unlink(missing_ok=True)
-        if eventos in hecho and eventos.exception():
-            # Sin Hyprland no hay nada que hacer; systemd decide si reinicia
-            raise eventos.exception()
+        for t in hecho & vigilantes:
+            if t.exception():
+                # Sin Hyprland no hay nada que hacer; systemd decide si reinicia
+                raise t.exception()
         log.info("parado")
 
-    async def _restaurar(self) -> None:
+    def _fondo_guardado(self, monitor: str) -> Path | None:
+        return self.guardado.monitores.get(monitor) or self.guardado.ultimo
+
+    async def _restaurar(self, monitores: list[str], intentos: int = 1) -> None:
+        """Vuelve a poner en estos monitores lo que tenian guardado."""
+        asignaciones = {}
+        for nombre in monitores:
+            fondo = self._fondo_guardado(nombre)
+            if fondo is None:
+                log.info("%s: sin fondo guardado; espero a `lienzo set` o `lienzo next`", nombre)
+            elif not fondo.is_file():
+                log.warning("%s: el ultimo fondo (%s) ya no existe", nombre, fondo)
+            else:
+                asignaciones[nombre] = fondo
+        if asignaciones:
+            try:
+                await self._aplicar(asignaciones, intentos)
+            except (BackendError, ValueError) as e:
+                log.error("no pude restaurar los fondos: %s", e)
+
+    # -------------------------------------------------------- monitores
+
+    def monitor_paleta(self) -> str | None:
+        """El monitor cuyo fondo da los colores a Noctalia."""
+        if self.cfg.palette_monitor in self.pantallas:
+            return self.cfg.palette_monitor
+        if not self.pantallas:
+            return None
+        return min(self.pantallas.values(), key=lambda p: p.id).nombre
+
+    async def _sincronizar_monitores(self) -> None:
+        """Se llama al conectar o desconectar un monitor."""
         try:
-            ultimo = Path(json.loads(STATE_PATH.read_text())["current"])
-        except (OSError, ValueError, KeyError, TypeError):
-            log.info("no hay fondo guardado; espero a `lienzo set` o `lienzo next`")
+            conectados = {m["name"]: m["id"] for m in await self.hypr.query("monitors")}
+        except (OSError, HyprlandError) as e:
+            log.warning("no pude consultar los monitores: %s", e)
             return
-        if not ultimo.is_file():
-            log.warning("el ultimo fondo (%s) ya no existe", ultimo)
-            return
-        try:
-            # Al iniciar sesion Noctalia puede tardar en aparecer: hasta 20 s
-            await self.apply(ultimo, intentos_noctalia=20)
-        except (BackendError, ValueError) as e:
-            log.error("no pude restaurar %s: %s", ultimo, e)
+        async with self._lock:
+            for nombre in set(self.pantallas) - set(conectados):
+                log.info("%s: desconectado", nombre)
+                await self._soltar_player(self.pantallas.pop(nombre))
+            nuevos = [n for n in conectados if n not in self.pantallas]
+            for nombre in nuevos:
+                log.info("%s: conectado", nombre)
+                self.pantallas[nombre] = Pantalla(nombre, conectados[nombre])
+            if nuevos:
+                await self._restaurar(nuevos)
+        await self._evaluar_pausa()
+
+    async def _soltar_player(self, p: Pantalla) -> None:
+        # Se suelta antes de pararlo para que _vigilar no lo cuente como caida
+        if p.player:
+            player, p.player = p.player, None
+            await player.stop()
 
     # -------------------------------------------------------- cambio de fondo
 
-    async def apply(self, path: Path, intentos_noctalia: int = 1) -> None:
+    def _destinos(self, monitor: str | None) -> list[str]:
+        if monitor is None:
+            return list(self.pantallas)
+        if monitor not in self.pantallas:
+            raise ValueError(f"monitor desconocido: {monitor} (conectados: {', '.join(self.pantallas)})")
+        return [monitor]
+
+    async def set(self, path: Path, monitor: str | None) -> None:
         # abspath y no resolve(): si la carpeta tiene enlaces simbolicos, la
         # ruta debe seguir coincidiendo con la de _lista() para que next avance
         path = Path(os.path.abspath(path.expanduser()))
-        tipo = tipo_de(path)
         if not path.is_file():
             raise ValueError(f"no existe: {path}")
-        if tipo is None:
+        if tipo_de(path) is None:
             raise ValueError(f"formato no soportado: {path.suffix or '(sin extension)'}")
-
+        destinos = self._destinos(monitor)
         async with self._lock:
-            self.error = None
-            if tipo == "imagen":
-                # Primero se quita el video para que se vea la transicion de
-                # Noctalia; al reves, ocurriria escondida detras de mpvpaper.
-                if self.player:
-                    viejo, self.player = self.player, None
-                    await viejo.stop()
-                await backends.noctalia_set(path, intentos_noctalia)
-            else:
-                nuevo = MpvPaper(self.cfg, path)
-                await nuevo.start(paused=self.paused)
-                # El viejo se cierra cuando el nuevo ya pinta: sin parpadeo
-                viejo, self.player = self.player, nuevo
-                self._lanzar(self._vigilar(nuevo))
+            await self._aplicar({m: path for m in destinos})
+
+    async def next(self, monitor: str | None) -> None:
+        """Cada monitor avanza por su propia carpeta."""
+        asignaciones = {}
+        for nombre in self._destinos(monitor):
+            carpeta = config.directorio_de(self.cfg, nombre)
+            lista = _lista(carpeta)
+            if not lista:
+                raise ValueError(f"no hay fondos en {carpeta}")
+            try:
+                i = lista.index(self.pantallas[nombre].actual) + 1
+            except ValueError:
+                i = 0
+            asignaciones[nombre] = lista[i % len(lista)]
+        async with self._lock:
+            await self._aplicar(asignaciones)
+
+    async def _aplicar(self, asignaciones: dict[str, Path], intentos: int = 1) -> None:
+        """Pone asignaciones[monitor] en cada monitor. Llamar con _lock cogido."""
+        # 1) Un fotograma por video distinto, aunque vaya a varios monitores
+        frames: dict[Path, Path | None] = {}
+        for path in set(asignaciones.values()):
+            if animado(path):
+                try:
+                    frames[path] = await backends.extraer_frame(path)
+                except (OSError, BackendError) as e:
+                    log.warning("sin fotograma para la paleta: %s", e)
+                    frames[path] = None
+
+        # 2) Videos: el mpvpaper nuevo arranca antes de cerrar el viejo, sin parpadeo
+        for nombre, path in asignaciones.items():
+            p = self.pantallas[nombre]
+            p.error = None
+            if animado(path):
+                nuevo = MpvPaper(self.cfg, path, nombre)
+                try:
+                    await nuevo.start(paused=self.pausado(p))
+                except BackendError as e:
+                    p.error = str(e)
+                    raise
+                viejo, p.player = p.player, nuevo
+                self._lanzar(self._vigilar(p, nuevo))
                 if viejo:
                     await viejo.stop()
 
-            self.current = path
-            _guardar_estado(path)
-            extra = ""
-            if self.player:
-                extra = f" (mpvpaper pid {self.player.proc.pid}{', en pausa' if self.paused else ''})"
-            log.info("fondo: %s [%s]%s", path, tipo, extra)
+        # 3) Noctalia. La paleta sale del ultimo wallpaper-set, asi que el
+        #    monitor de la paleta va el ultimo. Si no estaba entre los cambiados,
+        #    se le repite el suyo para que la paleta no se vaya a otro monitor.
+        paleta = self.monitor_paleta()
+        orden = sorted(asignaciones, key=lambda n: n == paleta)
+        if paleta and paleta not in asignaciones and self.pantallas[paleta].imagen_noctalia:
+            orden.append(paleta)
+        for nombre in orden:
+            p = self.pantallas[nombre]
+            path = asignaciones.get(nombre)
+            if path is None:  # el repaso del monitor de la paleta
+                imagen = p.imagen_noctalia
+            elif animado(path):
+                imagen = frames[path]
+            else:
+                # Primero se quita el video para que se vea la transicion de
+                # Noctalia; al reves, ocurriria escondida detras de mpvpaper.
+                await self._soltar_player(p)
+                imagen = path
+            if imagen:
+                await backends.noctalia_set(imagen, nombre, intentos)
+                p.imagen_noctalia = imagen
 
-    async def _vigilar(self, player: MpvPaper) -> None:
+        # 4) Estado
+        for nombre, path in asignaciones.items():
+            p = self.pantallas[nombre]
+            p.actual = path
+            self.guardado.monitores[nombre] = path
+            extra = f", mpvpaper pid {p.player.proc.pid}" if p.player else ""
+            pausa = ", en pausa" if p.player and self.pausado(p) else ""
+            log.info("%s: %s [%s%s%s]", nombre, path, tipo_de(path), extra, pausa)
+        self.guardado.ultimo = asignaciones.get(paleta) or next(iter(asignaciones.values()))
+        self.guardado.escribir()
+        backends.limpiar_frames({p.imagen_noctalia for p in self.pantallas.values() if p.imagen_noctalia})
+        if paleta in orden:
+            log.info("paleta desde %s: %s", paleta, self.pantallas[paleta].imagen_noctalia)
+
+    async def _vigilar(self, p: Pantalla, player: MpvPaper) -> None:
         codigo = await player.wait()
         # Si ya no es el reproductor actual, lo hemos parado nosotros
-        if player is self.player:
-            self.player = None
-            self.error = f"mpvpaper termino inesperadamente (codigo {codigo})"
-            log.error("%s reproduciendo %s", self.error, player.path)
-
-    def _lista(self) -> list[Path]:
-        if not self.cfg.directory.is_dir():
-            return []
-        return sorted(
-            (p for p in self.cfg.directory.iterdir() if p.is_file() and tipo_de(p)),
-            key=lambda p: p.name.lower(),
-        )
-
-    async def next(self) -> Path:
-        lista = self._lista()
-        if not lista:
-            raise ValueError(f"no hay fondos en {self.cfg.directory}")
-        try:
-            i = lista.index(self.current) + 1
-        except ValueError:
-            i = 0
-        siguiente = lista[i % len(lista)]
-        await self.apply(siguiente)
-        return siguiente
+        if player is not p.player:
+            return
+        p.player = None
+        if p.nombre not in self.pantallas:
+            return  # el monitor se ha ido y mpvpaper con el
+        p.error = f"mpvpaper termino inesperadamente (codigo {codigo})"
+        log.error("%s: %s reproduciendo %s", p.nombre, p.error, player.path)
 
     # -------------------------------------------------------- pausa
 
-    @property
-    def paused(self) -> bool:
-        return self.manual_pause or bool(self.auto_reasons)
+    def razones(self, p: Pantalla) -> list[str]:
+        r = []
+        if self.manual_pause:
+            r.append("pausa manual")
+        if self.juego:
+            r.append(self.juego)
+        if self.bateria:
+            r.append("funcionando con bateria")
+        if p.pantalla_completa:
+            r.append(p.pantalla_completa)
+        return r
+
+    def pausado(self, p: Pantalla) -> bool:
+        return bool(self.razones(p))
 
     async def _sincronizar_pausa(self) -> None:
-        if self.player and self.player.alive and self.player.paused != self.paused:
+        for p in list(self.pantallas.values()):
+            quiere = self.pausado(p)
+            if not (p.player and p.player.alive) or p.player.paused == quiere:
+                continue
             try:
-                await self.player.set_pause(self.paused)
+                await p.player.set_pause(quiere)
             except (OSError, BackendError, asyncio.TimeoutError) as e:
-                log.warning("no pude cambiar la pausa de mpv: %s", e)
-                return
-            if self.paused:
-                log.info("pausado: %s", "; ".join(self.razones()))
+                log.warning("%s: no pude cambiar la pausa de mpv: %s", p.nombre, e)
+                continue
+            if quiere:
+                log.info("%s: pausado: %s", p.nombre, "; ".join(self.razones(p)))
             else:
-                log.info("reanudado")
-
-    def razones(self) -> list[str]:
-        return (["pausa manual"] if self.manual_pause else []) + self.auto_reasons
+                log.info("%s: reanudado", p.nombre)
 
     async def _evaluar_pausa(self) -> None:
         try:
-            razones = await self._razones_automaticas()
+            await self._consultar_hyprland()
         except (OSError, HyprlandError) as e:
             log.warning("no pude consultar Hyprland: %s", e)
             return
-        if razones != self.auto_reasons:
-            self.auto_reasons = razones
-            if self.player is None:
-                log.debug("razones de pausa (sin video): %s", razones)
         await self._sincronizar_pausa()
 
-    async def _razones_automaticas(self) -> list[str]:
-        razones = []
+    async def _consultar_hyprland(self) -> None:
+        completas: dict[str, str] = {}
         if self.cfg.pause_on_fullscreen:
-            monitores = await self.hypr.query("monitors")
             # Solo cuenta lo visible: el workspace activo de cada monitor y el
             # especial si esta abierto. Una ventana a pantalla completa en un
             # workspace escondido no tapa el fondo.
             visibles = {}
-            for m in monitores:
+            for m in await self.hypr.query("monitors"):
                 visibles[m["activeWorkspace"]["id"]] = m["name"]
                 especial = m.get("specialWorkspace", {}).get("id", 0)
                 if especial:
@@ -236,26 +396,52 @@ class Daemon:
             for c in await self.hypr.query("clients"):
                 # fullscreen es una mascara: 1 = maximizada, 2 = pantalla completa.
                 # Maximizada deja ver el fondo por los huecos, asi que no cuenta.
-                if c.get("fullscreen", 0) & 2 and c["workspace"]["id"] in visibles:
-                    razones.append(f"pantalla completa: {c['class']} en {visibles[c['workspace']['id']]}")
+                monitor = visibles.get(c["workspace"]["id"])
+                if c.get("fullscreen", 0) & 2 and monitor:
+                    completas.setdefault(monitor, f"pantalla completa: {c['class']}")
+        for p in self.pantallas.values():
+            p.pantalla_completa = completas.get(p.nombre)
 
+        self.juego = None
         activa = await self.hypr.query("activewindow")
         if activa:
             clases = {activa.get("class", ""), activa.get("initialClass", "")} - {""}
-            if any(p.search(c) for p in self.cfg.pause_classes for c in clases):
-                razones.append(f"ventana de juego activa: {activa.get('class')}")
-        return razones
+            if any(pat.search(c) for pat in self.cfg.pause_classes for c in clases):
+                self.juego = f"juego en la ventana activa: {activa.get('class')}"
 
     async def _escuchar_hyprland(self) -> None:
         loop = asyncio.get_running_loop()
         async for nombre, _ in self.hypr.events():
-            if nombre not in EVENTOS_RELEVANTES:
-                continue
-            if self._debounce:
-                self._debounce.cancel()
-            self._debounce = loop.call_later(
-                DEBOUNCE_S, lambda: self._lanzar(self._evaluar_pausa())
-            )
+            if nombre in EVENTOS_MONITOR:
+                self._lanzar(self._sincronizar_monitores())
+            elif nombre in EVENTOS_RELEVANTES:
+                if self._debounce:
+                    self._debounce.cancel()
+                self._debounce = loop.call_later(
+                    DEBOUNCE_S, lambda: self._lanzar(self._evaluar_pausa())
+                )
+
+    def _actualizar_bateria(self, inicial: bool = False) -> bool:
+        estado = energia.en_bateria()
+        if inicial:
+            log.info("energia: %s", {None: "sin bateria (la pausa por bateria no aplica)",
+                                     True: "con bateria", False: "enchufado"}[estado])
+        nuevo = bool(estado)
+        cambio = nuevo != self.bateria
+        self.bateria = nuevo
+        if cambio and not inicial:
+            log.info("energia: %s", "con bateria" if nuevo else "enchufado")
+        return cambio
+
+    async def _escuchar_energia(self) -> None:
+        try:
+            async for _ in energia.cambios():
+                if self._actualizar_bateria():
+                    await self._sincronizar_pausa()
+        except OSError as e:
+            # No es motivo para tumbar el daemon: se pierde solo esta funcion
+            log.error("no puedo escuchar los cambios de energia: %s", e)
+            await asyncio.Event().wait()
 
     # -------------------------------------------------------- control
 
@@ -277,10 +463,11 @@ class Daemon:
 
     async def _orden(self, p: dict) -> dict:
         orden = p.get("cmd")
+        monitor = p.get("monitor")
         if orden == "set":
-            await self.apply(Path(p["path"]))
+            await self.set(Path(p["path"]), monitor)
         elif orden == "next":
-            await self.next()
+            await self.next(monitor)
         elif orden == "pause":
             self.manual_pause = True
             log.info("pausa manual pedida")
@@ -294,35 +481,40 @@ class Daemon:
         return {"ok": True, "status": await self.status()}
 
     async def status(self) -> dict:
-        tipo = tipo_de(self.current) if self.current else None
-        estado = {
-            "current": str(self.current) if self.current else None,
-            "kind": tipo,
-            "backend": None,
-            "animated": tipo in ("video", "gif"),
-            "paused": self.paused,
-            "reasons": self.razones(),
-            "directory": str(self.cfg.directory),
-            "error": self.error,
-        }
-        if tipo == "imagen":
-            estado["backend"] = "noctalia"
-        elif self.player and self.player.alive:
-            info = await self.player.info()
-            estado["backend"] = "mpvpaper"
-            estado["pid"] = self.player.proc.pid
-            estado["hwdec"] = info.get("hwdec-current")
-            estado["mpv_paused"] = info.get("pause")
-        return estado
+        paleta = self.monitor_paleta()
+        monitores = []
+        for p in sorted(self.pantallas.values(), key=lambda p: p.id):
+            tipo = tipo_de(p.actual) if p.actual else None
+            m = {
+                "name": p.nombre,
+                "current": str(p.actual) if p.actual else None,
+                "kind": tipo,
+                "backend": "noctalia" if tipo == "imagen" else None,
+                "palette": p.nombre == paleta,
+                "noctalia_image": str(p.imagen_noctalia) if p.imagen_noctalia else None,
+                "paused": self.pausado(p),
+                "reasons": self.razones(p),
+                "directory": str(config.directorio_de(self.cfg, p.nombre)),
+                "error": p.error,
+            }
+            if p.player and p.player.alive:
+                info = await p.player.info()
+                m.update(backend="mpvpaper", pid=p.player.proc.pid,
+                         hwdec=info.get("hwdec-current"), mpv_paused=info.get("pause"))
+            monitores.append(m)
+        return {"monitors": monitores, "palette_monitor": paleta,
+                "manual_pause": self.manual_pause, "on_battery": self.bateria}
 
 
 # ------------------------------------------------------------ utilidades
 
-def _guardar_estado(path: Path) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"current": str(path)}, ensure_ascii=False))
-    os.replace(tmp, STATE_PATH)
+def _lista(carpeta: Path) -> list[Path]:
+    if not carpeta.is_dir():
+        return []
+    return sorted(
+        (p for p in carpeta.iterdir() if p.is_file() and tipo_de(p)),
+        key=lambda p: p.name.lower(),
+    )
 
 
 async def _socket_vivo(path: Path) -> bool:

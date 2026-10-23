@@ -4,6 +4,15 @@
 # Carpeta de la que tira `lienzo next` (sin subcarpetas, orden alfabetico).
 directory = "~/Imágenes/lienzo"
 
+# Monitor cuyo fondo da los colores a Noctalia. Vacio = el primero de
+# Hyprland (id mas bajo). Con un video, la paleta sale de un fotograma suyo.
+palette_monitor = ""
+
+# Ajustes de un monitor concreto (el nombre es el de `hyprctl monitors`).
+# directory: carpeta propia para `lienzo next` en ese monitor.
+# [monitors.DP-1]
+# directory = "~/Imágenes/lienzo/vertical"
+
 [video]
 # Decodificacion por hardware de mpv. En la RTX 5070 con el driver 615
 # funcionan nvdec (CUDA) y vulkan. "no" la desactiva.
@@ -18,6 +27,9 @@ mpv_options = []
 # Pausa si hay una ventana a pantalla completa en un workspace visible.
 # Maximizar (SUPER+D) no cuenta: el fondo sigue viendose por los huecos.
 fullscreen = true
+# Pausa mientras el portatil funcione con bateria. En un equipo sin bateria
+# no hace nada.
+battery = true
 # Pausa mientras la ventana activa tenga una de estas clases. Son expresiones
 # regulares (sin distinguir mayusculas) contra class e initialClass; las ves
 # con `hyprctl clients`.

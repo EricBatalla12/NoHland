@@ -2,11 +2,6 @@
 
 Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 
-## Fase 2 (pedida)
-- Paleta de Noctalia desde un frame del vídeo (ffmpeg) al poner un vídeo.
-- Un fondo por monitor.
-- Pausa con batería en el portátil.
-
 ## Fase 3 (solo si se pide)
 - Selector visual (Noctalia o rofi con miniaturas).
 - Rotación automática cada X minutos.
@@ -22,6 +17,9 @@ Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 - Opción para pausar también con ventanas maximizadas (`fullscreen` modo 1).
 - Recargar `config.toml` sin reiniciar (SIGHUP o `lienzo reload`).
 - `lienzo prev`.
+- Pausa manual por monitor (`lienzo pause -m`). Hoy la manual es global.
+- Con batería, parar mpvpaper en vez de pausarlo (ver arriba): en el portátil
+  ese ~2 % sí cuenta.
 - Llevar a lienzo lo que hacía wallpaper.sh al cambiar de fondo: copiar al
   greeter, logo de fastfetch y color de OpenRGB. Encaja con el hook
   `wallpaper_changed` de Noctalia.

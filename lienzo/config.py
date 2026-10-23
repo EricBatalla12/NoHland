@@ -16,6 +16,7 @@ CONFIG_PATH = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "lienz
 STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "lienzo" / "state.json"
 RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "lienzo"
 CONTROL_SOCKET = RUNTIME_DIR / "control.sock"
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "lienzo"
 
 # Formatos que Noctalia sabe dibujar (los de su documentacion, salvo GIF, que
 # va a mpvpaper para que se anime).
@@ -45,6 +46,11 @@ class Config:
     layer: str = "bottom"
     mpv_options: list[str] = field(default_factory=list)
     pause_on_fullscreen: bool = True
+    pause_on_battery: bool = True
+    # Monitor del que sale la paleta; "" = el de id mas bajo en Hyprland
+    palette_monitor: str = ""
+    # Carpeta propia de algun monitor para `lienzo next`
+    monitor_dirs: dict[str, Path] = field(default_factory=dict)
     pause_classes: list[re.Pattern] = field(
         default_factory=lambda: [re.compile(p, re.IGNORECASE) for p in DEFAULT_PAUSE_CLASSES]
     )
@@ -70,6 +76,13 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
 
     cfg = Config()
     cfg.directory = Path(_get(raw, "directory", str, DEFAULT_DIRECTORY, "")).expanduser()
+    cfg.palette_monitor = _get(raw, "palette_monitor", str, "", "")
+
+    for nombre, tabla in _get(raw, "monitors", dict, {}, "").items():
+        if not isinstance(tabla, dict):
+            raise ConfigError(f"monitors.{nombre} deberia ser una tabla")
+        if "directory" in tabla:
+            cfg.monitor_dirs[nombre] = Path(_get(tabla, "directory", str, "", f"monitors.{nombre}")).expanduser()
 
     video = _get(raw, "video", dict, {}, "")
     cfg.hwdec = _get(video, "hwdec", str, cfg.hwdec, "video")
@@ -80,6 +93,7 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
 
     pause = _get(raw, "pause", dict, {}, "")
     cfg.pause_on_fullscreen = _get(pause, "fullscreen", bool, True, "pause")
+    cfg.pause_on_battery = _get(pause, "battery", bool, True, "pause")
     patrones = _get(pause, "classes", list, DEFAULT_PAUSE_CLASSES, "pause")
     try:
         cfg.pause_classes = [re.compile(p, re.IGNORECASE) for p in patrones]
@@ -87,3 +101,7 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
         raise ConfigError(f"pause.classes: expresion regular invalida ({e})") from e
 
     return cfg, True
+
+
+def directorio_de(cfg: Config, monitor: str) -> Path:
+    return cfg.monitor_dirs.get(monitor, cfg.directory)

@@ -28,33 +28,37 @@ def enviar(peticion: dict) -> dict:
 
 
 def imprimir_estado(e: dict) -> None:
-    if not e.get("current"):
-        print("Fondo:   ninguno")
-    else:
-        ruta = Path(e["current"])
-        print(f"Fondo:   {ruta.name}")
-        print(f"Ruta:    {ruta}")
-        tipo = e["kind"]
-        if e.get("backend") == "mpvpaper":
-            # mpv devuelve None hasta que abre el decodificador y "no" si
-            # decodifica por CPU (los GIF siempre)
-            hwdec = {None: "arrancando", "no": "software"}.get(e.get("hwdec"), e.get("hwdec"))
-            tipo += f" · mpvpaper (pid {e['pid']}) · decodificacion: {hwdec}"
-        elif e.get("backend"):
-            tipo += f" · {e['backend']}"
-        print(f"Tipo:    {tipo}")
-
-    if e.get("error"):
-        print(f"Error:   {e['error']}")
-    if e.get("animated") and e.get("backend") == "mpvpaper":
-        print(f"Estado:  {'pausado' if e['paused'] else 'reproduciendo'}")
-    elif e.get("current"):
-        print("Estado:  imagen fija (nada que pausar)")
-    for razon in e.get("reasons", []):
-        # Las razones se muestran aunque el fondo sea fijo: asi se ve que la
-        # deteccion funciona y que el siguiente video arrancara en pausa.
-        print(f"  · {razon}")
-    print(f"Carpeta: {e['directory']}")
+    for m in e["monitors"]:
+        cabecera = m["name"] + ("  (de aqui sale la paleta)" if m["palette"] else "")
+        print(cabecera)
+        if not m["current"]:
+            print("  Fondo:   ninguno")
+        else:
+            ruta = Path(m["current"])
+            print(f"  Fondo:   {ruta.name}")
+            print(f"  Ruta:    {ruta}")
+            tipo = m["kind"]
+            if m.get("backend") == "mpvpaper":
+                # mpv devuelve None hasta que abre el decodificador y "no" si
+                # decodifica por CPU (los GIF siempre)
+                hwdec = {None: "arrancando", "no": "software"}.get(m.get("hwdec"), m.get("hwdec"))
+                tipo += f" · mpvpaper (pid {m['pid']}) · decodificacion: {hwdec}"
+            elif m.get("backend"):
+                tipo += f" · {m['backend']}"
+            print(f"  Tipo:    {tipo}")
+            if m["kind"] != "imagen" and m.get("noctalia_image"):
+                print(f"  Debajo:  fotograma {Path(m['noctalia_image']).name} (Noctalia: paleta y bloqueo)")
+        if m.get("error"):
+            print(f"  Error:   {m['error']}")
+        if m.get("backend") == "mpvpaper":
+            print(f"  Estado:  {'pausado' if m['paused'] else 'reproduciendo'}")
+        elif m["current"]:
+            print("  Estado:  imagen fija (nada que pausar)")
+        for razon in m["reasons"]:
+            # Las razones se muestran aunque el fondo sea fijo: asi se ve que la
+            # deteccion funciona y que el siguiente video arrancara en pausa.
+            print(f"    · {razon}")
+        print(f"  Carpeta: {m['directory']}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("daemon", help="arranca el daemon (lo usa el servicio systemd)")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
-    sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
+    p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
+    for p in (p_set, p_next):
+        p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
     sub.add_parser("pause", help="pausa la animacion hasta `lienzo resume`")
     sub.add_parser("resume", help="quita la pausa manual")
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
@@ -76,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         return daemon_main()
 
     peticion = {"cmd": args.orden}
+    if getattr(args, "monitor", None):
+        peticion["monitor"] = args.monitor
     if args.orden == "set":
         # La ruta se resuelve aqui: el daemon no comparte el directorio actual
         peticion["path"] = os.path.abspath(args.archivo.expanduser())

@@ -6,16 +6,29 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
   transición (`noctalia msg wallpaper-set`), que de paso regenera la paleta.
 - **Vídeo (mp4, webm) y GIF**: mpvpaper en la capa `bottom` (encima del fondo
   de Noctalia y debajo de las ventanas), sin audio y con `hwdec=nvdec`.
-- **Pausa automática** cuando hay una ventana a pantalla completa en un
-  workspace visible o cuando la ventana activa es de Steam, un juego de
-  Proton, Lutris o Heroic (lista configurable). Escucha el socket2 de Hyprland:
+- **Paleta**: con un vídeo, ffmpeg saca un fotograma (al 25 % de la duración)
+  y Noctalia lo recibe como fondo de ese monitor, debajo de mpvpaper: de ahí
+  salen los colores y lo que ve la pantalla de bloqueo. Los fotogramas se
+  cachean en `~/.cache/lienzo/frames`.
+- **Un fondo por monitor**, cada uno con su mpvpaper. La paleta la manda un
+  monitor (`palette_monitor`). Al desconectar un monitor se para su vídeo; al
+  volver a conectarlo recupera su fondo.
+- **Pausa automática**, que se suma a la manual:
+  - ventana a pantalla completa en el workspace visible de un monitor
+    (pausa solo ese monitor);
+  - ventana activa de Steam, un juego de Proton, Lutris o Heroic (lista
+    configurable; pausa todos);
+  - portátil con batería (pausa todos).
+
+  Todo por eventos (socket2 de Hyprland y uevents del kernel por netlink):
   sin sondeos, 0 % de CPU en reposo.
 
 ## Uso
 
 ```
-lienzo set <archivo>   # pone un fondo
-lienzo next            # siguiente de la carpeta (orden alfabético)
+lienzo set <archivo>   # pone un fondo en todos los monitores
+lienzo set -m DP-1 <archivo>   # ...o solo en uno
+lienzo next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabético)
 lienzo pause           # pausa manual
 lienzo resume          # quita la pausa manual (la automática sigue mandando)
 lienzo status          # qué suena, si está pausado y por qué (--json)
@@ -47,8 +60,14 @@ reinicia el daemon si cae y manda los logs al journal sin hacer nada más.
 | `lienzo/cli.py` | subcomandos; cliente del socket de control |
 | `lienzo/daemon.py` | bucle asyncio: socket de control + eventos de Hyprland + pausa |
 | `lienzo/hyprland.py` | cliente de `.socket.sock` (consultas) y `.socket2.sock` (eventos) |
-| `lienzo/backends.py` | Noctalia para imágenes, mpvpaper + IPC de mpv para vídeo |
+| `lienzo/backends.py` | Noctalia para imágenes, mpvpaper + IPC de mpv para vídeo, fotograma con ffmpeg |
+| `lienzo/energia.py` | batería: lectura de `/sys/class/power_supply` y uevents del kernel |
 | `lienzo/config.py` | rutas y lectura de `config.toml` |
 
 Rutas en ejecución: socket de control en `$XDG_RUNTIME_DIR/lienzo/control.sock`,
-último fondo en `~/.local/state/lienzo/state.json`.
+último fondo de cada monitor en `~/.local/state/lienzo/state.json`.
+
+**Cómo sale la paleta (comprobado):** Noctalia la genera desde el último
+`noctalia msg wallpaper-set` que recibe, del monitor que sea y aunque repita la
+ruta. lienzo deja siempre para el final el monitor de la paleta; si se cambia
+otro monitor, le repite el suyo.
