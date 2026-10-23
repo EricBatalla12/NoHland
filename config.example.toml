@@ -1,17 +1,17 @@
-# Configuracion de lienzo: ~/.config/lienzo/config.toml
+# Configuracion de NoHland: ~/.config/nohland/config.toml
 # Todas las claves son opcionales; lo que falte toma el valor de aqui.
 
-# Carpeta de la que tira `lienzo next` (sin subcarpetas, orden alfabetico).
-directory = "~/Imágenes/lienzo"
+# Carpeta de la que tira `nohland next` (sin subcarpetas, orden alfabetico).
+directory = "~/Imágenes/NoHland"
 
 # Monitor cuyo fondo da los colores a Noctalia. Vacio = el primero de
 # Hyprland (id mas bajo). Con un video, la paleta sale de un fotograma suyo.
 palette_monitor = ""
 
 # Ajustes de un monitor concreto (el nombre es el de `hyprctl monitors`).
-# directory: carpeta propia para `lienzo next` en ese monitor.
+# directory: carpeta propia para `nohland next` en ese monitor.
 # [monitors.DP-1]
-# directory = "~/Imágenes/lienzo/vertical"
+# directory = "~/Imágenes/NoHland/vertical"
 
 [video]
 # Decodificacion por hardware de mpv. En la RTX 5070 con el driver 615

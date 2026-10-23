@@ -1,6 +1,6 @@
-"""Rutas y lectura de ~/.config/lienzo/config.toml.
+"""Rutas y lectura de ~/.config/nohland/config.toml.
 
-Todo tiene valor por defecto: sin fichero de config, lienzo arranca igual.
+Todo tiene valor por defecto: sin fichero de config, nohland arranca igual.
 Los errores de config (tipos o expresiones regulares mal escritas) paran el
 daemon con un mensaje claro en vez de ignorarse en silencio.
 """
@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 HOME = Path.home()
-CONFIG_PATH = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "lienzo" / "config.toml"
-STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "lienzo" / "state.json"
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "lienzo"
+CONFIG_PATH = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "nohland" / "config.toml"
+STATE_PATH = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "nohland" / "state.json"
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "nohland"
 CONTROL_SOCKET = RUNTIME_DIR / "control.sock"
-CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "lienzo"
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "nohland"
 
 # Formatos que Noctalia sabe dibujar (los de su documentacion, salvo GIF, que
 # va a mpvpaper para que se anime).
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".jxl", ".bmp", ".avif", ".heic", ".heif"}
 ANIMATED_EXT = {".mp4", ".webm", ".gif"}
 
-DEFAULT_DIRECTORY = "~/Imágenes/lienzo"
+DEFAULT_DIRECTORY = "~/Imágenes/NoHland"
 
 # Se comparan con re.search contra la clase y la clase inicial de la ventana
 # activa, sin distinguir mayusculas.
@@ -50,7 +50,7 @@ class Config:
     pause_on_battery: bool = True
     # Monitor del que sale la paleta; "" = el de id mas bajo en Hyprland
     palette_monitor: str = ""
-    # Carpeta propia de algun monitor para `lienzo next`
+    # Carpeta propia de algun monitor para `nohland next`
     monitor_dirs: dict[str, Path] = field(default_factory=dict)
     pause_classes: list[re.Pattern] = field(
         default_factory=lambda: [re.compile(p, re.IGNORECASE) for p in DEFAULT_PAUSE_CLASSES]
@@ -114,11 +114,11 @@ def directorio_de(cfg: Config, monitor: str) -> Path:
 
 # ------------------------------------------------------------ escritura
 # La usa la ventana de ajustes. tomllib solo lee, asi que aqui hay un
-# serializador minimo para el esquema de lienzo (cadenas, booleanos, listas de
+# serializador minimo para el esquema de nohland (cadenas, booleanos, listas de
 # cadenas y tablas). Los comentarios del fichero se pierden al guardar.
 
 CABECERA = """\
-# Configuracion de lienzo, guardada desde la ventana de ajustes (lienzo gui).
+# Configuracion de nohland, guardada desde la ventana de ajustes (nohland gui).
 # La explicacion de cada clave esta en config.example.toml del repo.
 """
 

@@ -1,4 +1,4 @@
-"""Ventana de ajustes: edita ~/.config/lienzo/config.toml.
+"""Ventana de ajustes: edita ~/.config/nohland/config.toml.
 
 Los cambios no se aplican al momento: se guardan con el boton «Guardar y
 aplicar» de cualquier pagina. Asi una regex a medio escribir no llega nunca al
@@ -93,7 +93,7 @@ def _acortar(ruta: str) -> str:
 
 class DialogoAjustes(Adw.PreferencesDialog):
     def __init__(self, app) -> None:
-        super().__init__(title="Ajustes de lienzo", search_enabled=False)
+        super().__init__(title="Ajustes de NoHland", search_enabled=False)
         self.app = app
         try:
             self.crudo = config.leer_crudo()

@@ -21,7 +21,7 @@ def enviar(peticion: dict, timeout: float = 30) -> dict:
             while trozo := s.recv(65536):
                 datos += trozo
     except (FileNotFoundError, ConnectionRefusedError) as e:
-        raise DaemonParado("el daemon no esta en marcha (systemctl --user start lienzo)") from e
+        raise DaemonParado("el daemon no esta en marcha (systemctl --user start nohland)") from e
     except TimeoutError as e:
         raise DaemonParado(f"el daemon no ha respondido en {timeout:.0f} s") from e
     return json.loads(datos)

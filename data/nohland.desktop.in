@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
-Name=lienzo
+Name=NoHland
 GenericName=Fondos de pantalla
 Comment=Elige y controla los fondos de pantalla animados
 # install.sh pone la ruta absoluta: el lanzador de Noctalia arranca las apps
 # como servicios systemd, cuyo PATH no incluye ~/.local/bin
-Exec=@LIENZO@ gui
+Exec=@NOHLAND@ gui
 Icon=preferences-desktop-wallpaper
 Terminal=false
 Categories=Settings;DesktopSettings;GTK;
 Keywords=wallpaper;fondo;video;mpvpaper;
-StartupWMClass=io.github.EricBatalla12.Lienzo
+StartupWMClass=io.github.EricBatalla12.NoHland

@@ -6,7 +6,7 @@ Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 - Rotación automática cada X minutos.
 
 ## Interfaz
-- Vista previa animada de los vídeos en la cuadrícula.
+- Vista previa animada de los vídeos en la cuadrícula (al pasar el ratón).
 - Widget en la barra de Noctalia (plugin en Luau) que abra la ventana.
 - Regla de Hyprland para que la ventana salga flotante y centrada.
 - Recargar la config sin reiniciar el servicio, para que guardar los ajustes
@@ -21,16 +21,16 @@ Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 - `gamescope` en la lista de clases por defecto (tu windowrules.lua ya lo trata
   como juego).
 - Opción para pausar también con ventanas maximizadas (`fullscreen` modo 1).
-- Recargar `config.toml` sin reiniciar (SIGHUP o `lienzo reload`).
-- `lienzo prev`.
-- Pausa manual por monitor (`lienzo pause -m`). Hoy la manual es global.
+- Recargar `config.toml` sin reiniciar (SIGHUP o `nohland reload`).
+- `nohland prev`.
+- Pausa manual por monitor (`nohland pause -m`). Hoy la manual es global.
 - Con batería, parar mpvpaper en vez de pausarlo (ver arriba): en el portátil
   ese ~2 % sí cuenta.
-- Llevar a lienzo lo que hacía wallpaper.sh al cambiar de fondo: copiar al
+- Llevar a NoHland lo que hacía wallpaper.sh al cambiar de fondo: copiar al
   greeter, logo de fastfetch y color de OpenRGB. Encaja con el hook
   `wallpaper_changed` de Noctalia.
 - Escenas de Wallpaper Engine (linux-wallpaperengine) como tercer backend, para
   retirar wallpaper.sh del todo. Hoy SUPER+ALT+W lo sigue lanzando y, si se
   usa, se apila con mpvpaper en la capa bottom.
 - El selector de fondos de Noctalia (SUPER+SHIFT+W) cambia el fondo de Noctalia
-  por debajo de lienzo sin que lienzo se entere.
+  por debajo de NoHland sin que NoHland se entere.

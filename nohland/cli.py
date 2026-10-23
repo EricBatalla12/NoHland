@@ -1,4 +1,4 @@
-"""CLI de lienzo. Todo salvo `daemon` es un cliente del socket de control."""
+"""CLI de NoHland. Todo salvo `daemon` es un cliente del socket de control."""
 
 import argparse
 import json
@@ -45,17 +45,17 @@ def imprimir_estado(e: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="lienzo", description="Gestor de fondos para Hyprland + Noctalia")
-    ap.add_argument("--version", action="version", version=f"lienzo {__version__}")
+    ap = argparse.ArgumentParser(prog="nohland", description="Gestor de fondos para Hyprland + Noctalia")
+    ap.add_argument("--version", action="version", version=f"nohland {__version__}")
     sub = ap.add_subparsers(dest="orden", required=True, metavar="orden")
     sub.add_parser("daemon", help="arranca el daemon (lo usa el servicio systemd)")
-    sub.add_parser("gui", help="abre la ventana de lienzo")
+    sub.add_parser("gui", help="abre la ventana de NoHland")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
     for p in (p_set, p_next):
         p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
-    sub.add_parser("pause", help="pausa la animacion hasta `lienzo resume`")
+    sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
     sub.add_parser("resume", help="quita la pausa manual")
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
     p_status.add_argument("--json", action="store_true", help="salida en JSON")
@@ -79,9 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         respuesta = enviar(peticion)
     except DaemonParado as e:
-        sys.exit(f"lienzo: {e}")
+        sys.exit(f"nohland: {e}")
     if not respuesta.get("ok"):
-        print(f"lienzo: {respuesta.get('error')}", file=sys.stderr)
+        print(f"nohland: {respuesta.get('error')}", file=sys.stderr)
         return 1
     if args.orden == "status" and args.json:
         print(json.dumps(respuesta["status"], indent=2, ensure_ascii=False))

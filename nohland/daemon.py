@@ -31,7 +31,7 @@ from .backends import BackendError, MpvPaper
 from .config import ANIMATED_EXT, CONTROL_SOCKET, IMAGE_EXT, RUNTIME_DIR, STATE_PATH, Config
 from .hyprland import Hyprland, HyprlandError
 
-log = logging.getLogger("lienzo")
+log = logging.getLogger("nohland")
 
 # Eventos de socket2 tras los que puede haber cambiado la ventana activa o lo
 # que esta a pantalla completa en algun monitor.
@@ -77,7 +77,7 @@ class Pantalla:
 
 @dataclass
 class Guardado:
-    """Lo que sobrevive a un reinicio, en ~/.local/state/lienzo/state.json."""
+    """Lo que sobrevive a un reinicio, en ~/.local/state/nohland/state.json."""
     # Ultimo fondo de cada monitor, tambien de los que ahora no estan conectados
     monitores: dict[str, Path] = field(default_factory=dict)
     # Para un monitor que se conecta sin fondo propio
@@ -131,7 +131,7 @@ class Daemon:
     async def run(self) -> None:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
         if await _socket_vivo(CONTROL_SOCKET):
-            raise SystemExit("ya hay un daemon de lienzo en marcha")
+            raise SystemExit("ya hay un daemon de NoHland en marcha")
         CONTROL_SOCKET.unlink(missing_ok=True)
         server = await asyncio.start_unix_server(self._cliente, path=CONTROL_SOCKET)
 
@@ -182,7 +182,7 @@ class Daemon:
         for nombre in monitores:
             fondo = self._fondo_guardado(nombre)
             if fondo is None:
-                log.info("%s: sin fondo guardado; espero a `lienzo set` o `lienzo next`", nombre)
+                log.info("%s: sin fondo guardado; espero a `nohland set` o `nohland next`", nombre)
             elif not fondo.is_file():
                 log.warning("%s: el ultimo fondo (%s) ya no existe", nombre, fondo)
             else:
@@ -543,7 +543,7 @@ def main() -> int:
         handler.setFormatter(_JournalFormatter("%(message)s"))
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%H:%M:%S"))
-    logging.basicConfig(level=os.environ.get("LIENZO_LOG", "INFO").upper(), handlers=[handler])
+    logging.basicConfig(level=os.environ.get("NOHLAND_LOG", "INFO").upper(), handlers=[handler])
 
     try:
         cfg, de_fichero = config.load()

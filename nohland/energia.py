@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 # Se puede apuntar a otra carpeta para probar sin desenchufar nada
-POWER_DIR = Path(os.environ.get("LIENZO_POWER_SUPPLY_DIR", "/sys/class/power_supply"))
+POWER_DIR = Path(os.environ.get("NOHLAND_POWER_SUPPLY_DIR", "/sys/class/power_supply"))
 
 NETLINK_KOBJECT_UEVENT = 15  # linux/netlink.h; Python no exporta la constante
 GRUPO_UEVENTS_KERNEL = 1

@@ -27,7 +27,7 @@ from pathlib import Path
 
 from .config import CACHE_DIR, RUNTIME_DIR, Config
 
-log = logging.getLogger("lienzo")
+log = logging.getLogger("nohland")
 
 
 class BackendError(Exception):
@@ -96,7 +96,7 @@ async def extraer_frame(video: Path) -> Path:
     tmp = destino.with_suffix(".tmp.jpg")
     for ss in dict.fromkeys((momento, 0.0)):  # si falla en ese punto, el primero
         rc, err = await _salida("ffmpeg", "-v", "error", "-y", "-ss", f"{ss:.2f}", "-i", str(video),
-                                "-frames:v", "1", "-q:v", "2", str(tmp))
+                                "-frames:v", "1", "-update", "1", "-q:v", "2", str(tmp))
         if rc == 0 and tmp.exists() and tmp.stat().st_size:
             os.replace(tmp, destino)
             return destino
@@ -212,7 +212,7 @@ class MpvPaper:
         self.paused = paused
 
     async def info(self) -> dict:
-        """Datos para `lienzo status`; vacio si mpv no contesta."""
+        """Datos para `nohland status`; vacio si mpv no contesta."""
         datos = {}
         for prop in ("hwdec-current", "pause"):
             try:
