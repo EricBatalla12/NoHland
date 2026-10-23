@@ -129,6 +129,14 @@ class DialogoAjustes(Adw.PreferencesDialog):
         self.opciones_mpv.set_text(shlex.join(video.get("mpv_options", [])))
         grupo.add(self.opciones_mpv)
         general.add(grupo)
+
+        grupo = Adw.PreferencesGroup(title="Actualizaciones")
+        self.actualizaciones = Adw.SwitchRow(
+            title="Buscar versiones nuevas al abrir la ventana",
+            subtitle="Consulta GitHub como mucho cada 6 horas; actualizar lo decides tú")
+        self.actualizaciones.set_active(self.crudo.get("check_updates", cfg.check_updates))
+        grupo.add(self.actualizaciones)
+        general.add(grupo)
         general.add(self._grupo_guardar())
         self.add(general)
 
@@ -219,6 +227,8 @@ class DialogoAjustes(Adw.PreferencesDialog):
             return
         video = crudo.setdefault("video", {})
         video.update(hwdec=_valor_combo(self.hwdec), layer=_valor_combo(self.capa), mpv_options=opciones)
+
+        crudo["check_updates"] = self.actualizaciones.get_active()
 
         pausa = crudo.setdefault("pause", {})
         pausa.update(fullscreen=self.completa.get_active(), battery=self.bateria.get_active(),

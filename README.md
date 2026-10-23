@@ -148,8 +148,16 @@ La carpeta de fondos por defecto es `NoHland` dentro de la carpeta de imágenes
 del sistema (`~/Imágenes/NoHland`, `~/Pictures/NoHland`... según el idioma). Se
 crea sola al arrancar.
 
-Para actualizar: `git pull` y `systemctl --user restart nohland` (vuelve a pasar
-`./install.sh` si cambian el icono o la entrada del lanzador).
+Para actualizar no hace falta la terminal: al abrir la ventana, NoHland mira
+en GitHub (como mucho cada 6 horas) si hay versión nueva y, si la hay, avisa
+arriba con «Ver y actualizar». El diálogo enseña las novedades (los títulos de
+los commits nuevos) y «Actualizar» hace `git pull --ff-only`, vuelve a pasar
+`install.sh` y reinicia el servicio. Nunca actualiza solo. Si la copia tiene
+cambios sin guardar, avisa pero no la toca; si va por delante de GitHub (el
+equipo donde se desarrolla), no avisa. También: menú → «Buscar
+actualizaciones», y se puede apagar en Ajustes (`check_updates = false`).
+
+A mano sería: `git pull`, `./install.sh` y `systemctl --user restart nohland`.
 
 ### Comprobar el equipo
 

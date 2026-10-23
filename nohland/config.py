@@ -77,6 +77,8 @@ class Config:
     pause_on_battery: bool = True
     # Monitor del que sale la paleta; "" = el de id mas bajo en Hyprland
     palette_monitor: str = ""
+    # Mirar en GitHub si hay version nueva al abrir la ventana
+    check_updates: bool = True
     # Carpeta propia de algun monitor para `nohland next`
     monitor_dirs: dict[str, Path] = field(default_factory=dict)
     # Minutos entre cambios de la rotacion automatica. Si esta encendida o no
@@ -108,6 +110,7 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
     cfg = Config()
     cfg.directory = Path(_get(raw, "directory", str, DEFAULT_DIRECTORY, "")).expanduser()
     cfg.palette_monitor = _get(raw, "palette_monitor", str, "", "")
+    cfg.check_updates = _get(raw, "check_updates", bool, True, "")
 
     for nombre, tabla in _get(raw, "monitors", dict, {}, "").items():
         if not isinstance(tabla, dict):

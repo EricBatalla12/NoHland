@@ -30,7 +30,7 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import __version__, config, miniaturas  # noqa: E402
+from . import __version__, actualizar, config, miniaturas  # noqa: E402
 from .cliente import DaemonParado, enviar  # noqa: E402
 from .config import ANIMATED_EXT, IMAGE_EXT  # noqa: E402
 
@@ -687,6 +687,7 @@ class Ventana(Adw.ApplicationWindow):
 
         menu = Gio.Menu()
         menu.append("Ajustes", "app.ajustes")
+        menu.append("Buscar actualizaciones", "app.buscar-actualizacion")
         menu.append("Acerca de NoHland", "app.acerca")
         cabecera.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menú"))
         abrir = Gtk.Button(action_name="app.abrir", tooltip_text="Poner un archivo de cualquier carpeta",
@@ -704,6 +705,9 @@ class Ventana(Adw.ApplicationWindow):
 
         self.aviso = Adw.Banner(title="El daemon de NoHland no está en marcha", button_label="Arrancar")
         self.aviso.set_action_name("app.arrancar-daemon")
+        self.aviso_version = Adw.Banner(button_label="Ver y actualizar")
+        self.aviso_version.set_action_name("app.ver-actualizacion")
+        self.actualizacion: dict | None = None
 
         # --- portada
         self.portada = Portada()
@@ -804,6 +808,7 @@ class Ventana(Adw.ApplicationWindow):
         vista = Adw.ToolbarView()
         vista.add_top_bar(cabecera)
         vista.add_top_bar(self.aviso)
+        vista.add_top_bar(self.aviso_version)
         vista.set_content(desplazable)
         self.toasts = Adw.ToastOverlay(child=vista)
         self.set_content(self.toasts)
@@ -814,6 +819,8 @@ class Ventana(Adw.ApplicationWindow):
         self.add_controller(atajo)
 
         self._refrescar()
+        if config.load()[0].check_updates:
+            self.buscar_actualizacion(forzar=False)
         self._temporizador = GLib.timeout_add_seconds(REFRESCO_S, self._refrescar)
         self.connect("close-request", self._al_cerrar)
 
@@ -821,6 +828,23 @@ class Ventana(Adw.ApplicationWindow):
         GLib.source_remove(self._temporizador)
         self._hilos_miniaturas.shutdown(wait=False, cancel_futures=True)
         return False
+
+    def buscar_actualizacion(self, forzar: bool) -> None:
+        def hecho(r, error):
+            if error:
+                r = {"estado": "error", "nuevos": [], "detalle": str(error)}
+            self.actualizacion = r
+            hay = r["estado"] in ("nueva", "cambios-locales")
+            if hay:
+                n = len(r["nuevos"])
+                self.aviso_version.set_title(f"Hay una versión nueva de NoHland ({n} cambio{'s' if n != 1 else ''})")
+            self.aviso_version.set_revealed(hay)
+            if forzar and not hay:
+                self.avisar({"al-dia": "Ya tienes la última versión",
+                             "por-delante": "Tu copia va por delante de GitHub (estás desarrollando)",
+                             "no-git": "NoHland no está instalado desde una copia de git",
+                             }.get(r["estado"], f"No pude consultar GitHub: {r['detalle']}"))
+        en_hilo(lambda: actualizar.comprobar(forzar), hecho)
 
     def avisar(self, texto: str) -> None:
         self.toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(texto), timeout=3))
@@ -1171,6 +1195,8 @@ class Aplicacion(Adw.Application):
             "web": ("s", self._web),
             "ajustes": (None, self._ajustes),
             "acerca": (None, self._acerca),
+            "buscar-actualizacion": (None, lambda *_: self.ventana.buscar_actualizacion(forzar=True)),
+            "ver-actualizacion": (None, self._ver_actualizacion),
             "arrancar-daemon": (None, self._arrancar_daemon),
             "salir": (None, lambda *_: self.quit()),
         }
@@ -1361,6 +1387,50 @@ class Aplicacion(Adw.Application):
     def _ajustes(self, *_):
         from .ajustes import DialogoAjustes
         DialogoAjustes(self).present(self.ventana)
+
+    def _ver_actualizacion(self, *_):
+        r = self.ventana.actualizacion or {"estado": "al-dia", "nuevos": []}
+        novedades = "\n".join(f"• {titulo}" for _sha, titulo in r["nuevos"][:12])
+        if len(r["nuevos"]) > 12:
+            novedades += f"\n• …y {len(r['nuevos']) - 12} más"
+        dialogo = Adw.AlertDialog(heading="Novedades de NoHland", body=novedades or "Sin cambios")
+        dialogo.add_response("cerrar", "Ahora no")
+        if r["estado"] == "nueva":
+            dialogo.add_response("actualizar", "Actualizar")
+            dialogo.set_response_appearance("actualizar", Adw.ResponseAppearance.SUGGESTED)
+            dialogo.set_default_response("actualizar")
+        elif r["estado"] == "cambios-locales":
+            dialogo.set_body(dialogo.get_body() + "\n\nTu copia tiene cambios sin guardar, así que no la toco: "
+                             f"actualiza a mano con git en {actualizar.REPO}.")
+        dialogo.set_close_response("cerrar")
+        dialogo.connect("response", lambda _d, resp: resp == "actualizar" and self._actualizar())
+        dialogo.present(self.ventana)
+
+    def _actualizar(self):
+        self.ventana.avisar("Actualizando NoHland…")
+        self.ventana.aviso_version.set_revealed(False)
+
+        def hecho(resumen, error):
+            if error:
+                self.ventana.avisar(f"No pude actualizar: {error}")
+                return
+            fin = Adw.AlertDialog(heading="NoHland actualizado",
+                                  body=f"Versión {resumen}. El servicio ya se ha reiniciado; "
+                                       "falta reabrir esta ventana para ver lo nuevo.")
+            fin.add_response("luego", "Luego")
+            fin.add_response("reabrir", "Reabrir ahora")
+            fin.set_response_appearance("reabrir", Adw.ResponseAppearance.SUGGESTED)
+            fin.set_default_response("reabrir")
+            fin.connect("response", lambda _d, resp: resp == "reabrir" and self._reabrir())
+            fin.present(self.ventana)
+        en_hilo(actualizar.actualizar, hecho)
+
+    def _reabrir(self):
+        # La app es de instancia unica: la nueva se lanza con un segundo de
+        # retraso para que esta haya soltado su nombre en D-Bus
+        subprocess.Popen(["sh", "-c", f"sleep 1; exec {actualizar.REPO / 'bin' / 'nohland'} gui"],
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.quit()
 
     def _acerca(self, *_):
         Adw.AboutDialog(

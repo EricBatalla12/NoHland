@@ -10,6 +10,10 @@
 # Hyprland (id mas bajo). Con un video, la paleta sale de un fotograma suyo.
 palette_monitor = ""
 
+# Al abrir la ventana, mirar en GitHub si hay una version nueva de NoHland
+# (como mucho cada 6 horas). Actualizar siempre lo decides tu con un boton.
+check_updates = true
+
 # Ajustes de un monitor concreto (el nombre es el de `hyprctl monitors`).
 # directory: carpeta propia para `nohland next` en ese monitor.
 # [monitors.DP-1]

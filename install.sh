@@ -76,6 +76,9 @@ case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) echo "aviso: ~/.local/bin no esta en tu PATH; añadelo para usar el comando nohland." ;;
 esac
-echo
-echo "Revision del equipo (nohland doctor):"
-"$repo/bin/nohland" doctor || true
+# Al actualizar desde la ventana no hace falta repetir la revision
+if [ -z "${NOHLAND_SIN_DOCTOR:-}" ]; then
+    echo
+    echo "Revision del equipo (nohland doctor):"
+    "$repo/bin/nohland" doctor || true
+fi
