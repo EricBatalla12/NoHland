@@ -1448,16 +1448,20 @@ class Aplicacion(Adw.Application):
         self.reiniciar_daemon(arrancar=True)
 
     def reiniciar_daemon(self, arrancar: bool = False) -> None:
-        verbo = "start" if arrancar else "restart"
+        # «Arrancar» tambien lo habilita: si solo se arrancara, tras reiniciar
+        # el equipo NoHland no volveria a arrancar solo
+        orden = ["enable", "--now"] if arrancar else ["restart"]
+        verbo = " ".join(orden)
 
         def al_terminar(r, error):
             if error or r.returncode:
                 detalle = error or r.stderr.strip()
                 self.ventana.avisar(f"systemctl --user {verbo} nohland falló: {detalle}")
             else:
-                self.ventana.avisar("NoHland arrancado" if arrancar else "Ajustes aplicados; NoHland reiniciado")
+                self.ventana.avisar("NoHland arrancado; desde ahora arranca solo al iniciar sesión" if arrancar
+                                    else "Ajustes aplicados; NoHland reiniciado")
             self.ventana._refrescar()
-        en_hilo(lambda: subprocess.run(["systemctl", "--user", verbo, "nohland"],
+        en_hilo(lambda: subprocess.run(["systemctl", "--user", *orden, "nohland"],
                                        capture_output=True, text=True, timeout=30), al_terminar)
 
 

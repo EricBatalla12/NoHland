@@ -131,16 +131,16 @@ que mpv resuelve sola (en NVIDIA acaba en nvdec). Con NVIDIA se puede fijar
 git clone https://github.com/EricBatalla12/NoHland ~/Proyectos/NoHland
 cd ~/Proyectos/NoHland
 ./install.sh
-systemctl --user enable --now nohland
 ```
 
-(El repo es privado: hace falta que su dueño te dé acceso. Con acceso, también
-vale `gh repo clone EricBatalla12/NoHland`.)
+Después abre NoHland (lanzador o `nohland gui`) y pulsa **«Arrancar»** en el
+aviso de arriba: lo arranca y lo deja habilitado para que arranque solo en cada
+inicio de sesión. Es lo mismo que `systemctl --user enable --now nohland`.
 
 `install.sh` no instala paquetes ni pide contraseña. Primero comprueba los
 requisitos y, si falta algo imprescindible, dice qué y cómo conseguirlo, sin
 tocar nada (`--forzar` lo instala igualmente). Después enlaza `bin/nohland` en
-`~/.local/bin`, el servicio en `~/.config/systemd/user` y el icono en el tema
+`~/.local/bin`, copia el servicio a `~/.config/systemd/user`, enlaza el icono en el tema
 hicolor, crea la entrada del lanzador, copia `config.example.toml` a
 `~/.config/nohland/config.toml` si no hay ninguna y termina con
 `nohland doctor`.

@@ -138,9 +138,12 @@ def revisar() -> list[tuple[str, str, str, str]]:
     else:
         _, activo = _salida("systemctl", "--user", "is-active", "nohland")
         _, habilitado = _salida("systemctl", "--user", "is-enabled", "nohland")
-        estado = OK if activo == "active" else AVISO
-        anota(estado, "Servicio", f"{activo} · {habilitado}",
-              "" if estado == OK else "systemctl --user enable --now nohland")
+        estado = OK if activo == "active" and habilitado == "enabled" else AVISO
+        detalle = f"{activo} · {habilitado}"
+        if activo == "active" and habilitado != "enabled":
+            detalle += " (no arrancará solo al iniciar sesión)"
+        anota(estado, "Servicio", detalle,
+              "" if estado == OK else "pulsa «Arrancar» en la ventana, o systemctl --user enable --now nohland")
         _, entorno = _salida("systemctl", "--user", "show-environment")
         if "HYPRLAND_INSTANCE_SIGNATURE=" not in entorno:
             anota(FALLO, "Entorno del servicio", "systemd no conoce la sesión de Hyprland (¿sin UWSM?)",

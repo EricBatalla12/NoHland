@@ -2,7 +2,7 @@
 # Instala NoHland para el usuario actual (sin root):
 #   - comprueba antes que esten Hyprland, Noctalia y los programas que usa
 #   - enlaza el ejecutable en ~/.local/bin
-#   - enlaza el servicio en ~/.config/systemd/user
+#   - copia el servicio a ~/.config/systemd/user
 #   - crea la entrada del lanzador (nohland gui) e instala su icono
 #   - copia la config de ejemplo si todavia no hay ninguna
 #   - termina con `nohland doctor`, que dice si falta algo mas
@@ -50,7 +50,11 @@ fi
 # ------------------------------------------------------------ instalacion
 mkdir -p ~/.local/bin ~/.config/systemd/user ~/.config/nohland
 ln -sfn "$repo/bin/nohland" ~/.local/bin/nohland
-ln -sfn "$repo/systemd/nohland.service" ~/.config/systemd/user/nohland.service
+# El servicio se COPIA, no se enlaza: con un enlace, `systemctl --user disable`
+# borra el propio enlace y despues ya no se puede volver a habilitar. Al
+# actualizar se vuelve a copiar.
+rm -f ~/.config/systemd/user/nohland.service
+cp "$repo/systemd/nohland.service" ~/.config/systemd/user/nohland.service
 
 # Icono de la app en el tema hicolor del usuario
 mkdir -p ~/.local/share/icons/hicolor/scalable/apps
@@ -70,7 +74,8 @@ fi
 systemctl --user daemon-reload 2>/dev/null || true
 
 echo
-echo "Instalado. Para arrancarlo con la sesion:"
+echo "Instalado. Para arrancarlo ya y en cada inicio de sesion, abre NoHland y"
+echo "pulsa «Arrancar», o ejecuta:"
 echo "  systemctl --user enable --now nohland"
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
