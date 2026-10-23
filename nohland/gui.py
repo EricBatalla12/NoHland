@@ -417,7 +417,10 @@ class PopoverEscritorio(Gtk.Popover):
         self.estilo.connect("notify::selected", self._estilo_cambiado)
         fila.append(self.estilo)
         caja.append(fila)
-        mas = Gtk.Button(label="Qué apps se recolorean… (ajustes de Noctalia)", halign=Gtk.Align.START)
+        # Abre los ajustes de Noctalia en «Plantillas»: una casilla por app
+        # (GTK, Qt, kitty, btop, bordes de Hyprland...) que cambia de color
+        mas = Gtk.Button(label="Elegir qué apps cambian de color…", halign=Gtk.Align.START,
+                         tooltip_text="Abre las plantillas de Noctalia: una casilla por aplicación")
         mas.add_css_class("flat")
         mas.connect("clicked", lambda *_: (self.popdown(), ventana.app.activate_action("noctalia-ajustes", None)))
         caja.append(mas)
@@ -1183,7 +1186,8 @@ class Aplicacion(Adw.Application):
             "colores": ("b", self._colores),
             "colores-estilo": ("s", self._colores_estilo),
             "noctalia-ajustes": (None, lambda *_: subprocess.Popen(
-                ["noctalia", "msg", "settings-open"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)),
+                ["noctalia", "msg", "settings-open", "templates"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)),
             "greeter-modo": ("s", lambda _a, p: self.orden(
                 {"cmd": "greeter", "mode": p.get_string()}, "Inicio de sesión: " + {
                     "escritorio": "como el escritorio", "fija": "imagen fija", "no": "no se toca"}[p.get_string()])),

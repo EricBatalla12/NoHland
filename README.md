@@ -63,8 +63,9 @@ libadwaita que hace todo lo del CLI:
   - «Los colores siguen al fondo»: enciende o apaga la paleta de Noctalia
     sacada del fondo (`noctalia msg color-scheme-set`), con el estilo del
     generador (fiel, suave, vivo...). Al apagarla vuelve a la paleta fija que
-    tuvieras en Noctalia. Qué apps se recolorean se elige en los ajustes de
-    Noctalia (plantillas).
+    tuvieras en Noctalia. «Elegir qué apps cambian de color…» abre los ajustes
+    de Noctalia en Plantillas, con una casilla por aplicación (GTK, Qt, kitty,
+    btop, bordes de Hyprland...).
   - Fondo de la pantalla de inicio de sesión: «Como el escritorio» (con
     vídeos, su fotograma), «Imagen fija» (también desde el menú de cada
     tarjeta: «Usar en el inicio de sesión») o «No tocarla». Ver más abajo.
