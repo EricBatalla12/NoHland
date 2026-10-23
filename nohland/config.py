@@ -52,6 +52,9 @@ class Config:
     palette_monitor: str = ""
     # Carpeta propia de algun monitor para `nohland next`
     monitor_dirs: dict[str, Path] = field(default_factory=dict)
+    # Minutos entre cambios de la rotacion automatica. Si esta encendida o no
+    # lo decide el interruptor de la ventana (se guarda en state.json)
+    rotation_minutes: float = 15
     pause_classes: list[re.Pattern] = field(
         default_factory=lambda: [re.compile(p, re.IGNORECASE) for p in DEFAULT_PAUSE_CLASSES]
     )
@@ -95,6 +98,12 @@ def load(path: Path = CONFIG_PATH) -> tuple[Config, bool]:
         # mpvpaper recibe todas las opciones en una cadena y la corta por espacios
         if not isinstance(opcion, str) or not opcion or any(c.isspace() for c in opcion):
             raise ConfigError(f"video.mpv_options: {opcion!r} no vale (mpvpaper no admite espacios dentro de una opcion)")
+
+    rotacion = _get(raw, "rotation", dict, {}, "")
+    minutos = rotacion.get("interval_minutes", cfg.rotation_minutes)
+    if isinstance(minutos, bool) or not isinstance(minutos, (int, float)) or minutos < 0.1:
+        raise ConfigError(f"rotation.interval_minutes = {minutos!r}: tiene que ser un numero de minutos >= 0.1")
+    cfg.rotation_minutes = float(minutos)
 
     pause = _get(raw, "pause", dict, {}, "")
     cfg.pause_on_fullscreen = _get(pause, "fullscreen", bool, True, "pause")

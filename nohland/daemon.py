@@ -12,6 +12,13 @@ en epoll y no gasta CPU.
 
 Cada monitor tiene su fondo y, si es un video, su propio mpvpaper.
 
+Rotacion: con el interruptor encendido, cada `interval_minutes` cada monitor
+pasa al siguiente fondo de su carpeta. Es un unico temporizador (call_at), asi
+que en reposo sigue sin haber nada que despierte el proceso. Un monitor en
+pausa no cambia: queda pendiente y cambia cuando lleva GRACIA_ROTACION_S sin
+pausa, para no hacerlo en un alt-tab de dos segundos fuera de un juego. Poner
+un fondo a mano reinicia la cuenta.
+
 Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
 manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
 ventana a pantalla completa en el workspace visible de ESE monitor). `resume`
@@ -44,6 +51,8 @@ EVENTOS_MONITOR = {"monitoraddedv2", "monitorremovedv2"}
 # Los eventos llegan en rafagas (cerrar una ventana dispara tres o cuatro).
 # Se espera este margen y se evalua una sola vez.
 DEBOUNCE_S = 0.15
+# Tiempo sin pausa antes de hacer un cambio de rotacion que estaba pendiente
+GRACIA_ROTACION_S = 30
 
 
 def tipo_de(path: Path) -> str | None:
@@ -82,6 +91,8 @@ class Guardado:
     monitores: dict[str, Path] = field(default_factory=dict)
     # Para un monitor que se conecta sin fondo propio
     ultimo: Path | None = None
+    # El interruptor de la rotacion automatica
+    rotacion: bool = False
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -94,6 +105,7 @@ class Guardado:
         return cls(
             monitores={k: Path(v) for k, v in datos.get("monitors", {}).items()},
             ultimo=Path(datos["ultimo"]) if datos.get("ultimo") else None,
+            rotacion=bool(datos.get("rotation", False)),
         )
 
     def escribir(self) -> None:
@@ -102,6 +114,7 @@ class Guardado:
         tmp.write_text(json.dumps({
             "monitors": {k: str(v) for k, v in self.monitores.items()},
             "ultimo": str(self.ultimo) if self.ultimo else None,
+            "rotation": self.rotacion,
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -117,6 +130,12 @@ class Daemon:
         self.bateria = False
         self._lock = asyncio.Lock()
         self._debounce: asyncio.TimerHandle | None = None
+        # Rotacion: cuando toca el proximo cambio (hora del bucle) y que
+        # monitores esperan a que se les quite la pausa para cambiar
+        self._rotacion_hasta: float | None = None
+        self._rotacion_timer: asyncio.TimerHandle | None = None
+        self._gracia_timer: asyncio.TimerHandle | None = None
+        self.pendientes: set[str] = set()
         self._stop = asyncio.Event()
         # asyncio solo guarda referencias debiles a las tareas sueltas
         self._tareas: set[asyncio.Task] = set()
@@ -152,6 +171,10 @@ class Daemon:
         # Al iniciar sesion Noctalia puede tardar en aparecer: hasta 20 s
         async with self._lock:
             await self._restaurar(list(self.pantallas), intentos=20)
+
+        if self.guardado.rotacion:
+            log.info("rotacion: encendida, cada %g min", self.cfg.rotation_minutes)
+            self._programar_rotacion()
 
         vigilantes = {asyncio.create_task(self._escuchar_hyprland())}
         if self.cfg.pause_on_battery:
@@ -248,22 +271,32 @@ class Daemon:
         destinos = self._destinos(monitor)
         async with self._lock:
             await self._aplicar({m: path for m in destinos})
+        self._cambio_manual(destinos)
 
     async def next(self, monitor: str | None) -> None:
         """Cada monitor avanza por su propia carpeta."""
+        destinos = self._destinos(monitor)
+        asignaciones = self._siguientes(destinos)
+        for nombre in destinos:
+            if nombre not in asignaciones:
+                raise ValueError(f"no hay fondos en {config.directorio_de(self.cfg, nombre)}")
+        async with self._lock:
+            await self._aplicar(asignaciones)
+        self._cambio_manual(destinos)
+
+    def _siguientes(self, monitores) -> dict[str, Path]:
+        """El siguiente fondo de la carpeta de cada monitor (sin los de carpeta vacia)."""
         asignaciones = {}
-        for nombre in self._destinos(monitor):
-            carpeta = config.directorio_de(self.cfg, nombre)
-            lista = _lista(carpeta)
+        for nombre in monitores:
+            lista = _lista(config.directorio_de(self.cfg, nombre))
             if not lista:
-                raise ValueError(f"no hay fondos en {carpeta}")
+                continue
             try:
                 i = lista.index(self.pantallas[nombre].actual) + 1
             except ValueError:
                 i = 0
             asignaciones[nombre] = lista[i % len(lista)]
-        async with self._lock:
-            await self._aplicar(asignaciones)
+        return asignaciones
 
     async def _aplicar(self, asignaciones: dict[str, Path], intentos: int = 1) -> None:
         """Pone asignaciones[monitor] en cada monitor. Llamar con _lock cogido."""
@@ -326,7 +359,14 @@ class Daemon:
             log.info("%s: %s [%s%s%s]", nombre, path, tipo_de(path), extra, pausa)
         self.guardado.ultimo = asignaciones.get(paleta) or next(iter(asignaciones.values()))
         self.guardado.escribir()
-        backends.limpiar_frames({p.imagen_noctalia for p in self.pantallas.values() if p.imagen_noctalia})
+        # Se guardan los fotogramas de todos los videos de las carpetas: la
+        # rotacion volvera a ellos y sacarlos de nuevo cuesta CPU
+        conservar = {p.imagen_noctalia for p in self.pantallas.values() if p.imagen_noctalia}
+        for nombre in self.pantallas:
+            for f in _lista(config.directorio_de(self.cfg, nombre)):
+                if animado(f):
+                    conservar.add(backends.ruta_frame(f))
+        backends.limpiar_frames(conservar)
         if paleta in orden:
             log.info("paleta desde %s: %s", paleta, self.pantallas[paleta].imagen_noctalia)
 
@@ -340,6 +380,70 @@ class Daemon:
             return  # el monitor se ha ido y mpvpaper con el
         p.error = f"mpvpaper termino inesperadamente (codigo {codigo})"
         log.error("%s: %s reproduciendo %s", p.nombre, p.error, player.path)
+
+    # -------------------------------------------------------- rotacion
+
+    def _programar_rotacion(self) -> None:
+        """Empieza la cuenta hasta el proximo cambio (o la para si esta apagada)."""
+        if self._rotacion_timer:
+            self._rotacion_timer.cancel()
+            self._rotacion_timer = None
+        if not self.guardado.rotacion:
+            self._rotacion_hasta = None
+            return
+        loop = asyncio.get_running_loop()
+        self._rotacion_hasta = loop.time() + self.cfg.rotation_minutes * 60
+        self._rotacion_timer = loop.call_at(self._rotacion_hasta, lambda: self._lanzar(self._toca_rotar()))
+
+    def _cambio_manual(self, monitores) -> None:
+        # Quien acaba de elegir un fondo no quiere que la rotacion se lo quite
+        # al minuto: la cuenta vuelve a empezar
+        self.pendientes -= set(monitores)
+        if self.guardado.rotacion:
+            self._programar_rotacion()
+
+    async def poner_rotacion(self, encendida: bool) -> None:
+        self.guardado.rotacion = encendida
+        self.guardado.escribir()
+        self.pendientes.clear()
+        self._programar_rotacion()
+        log.info("rotacion: %s", f"encendida, cada {self.cfg.rotation_minutes:g} min" if encendida else "apagada")
+
+    async def _toca_rotar(self) -> None:
+        self._programar_rotacion()  # la siguiente cuenta empieza ya
+        self.pendientes |= set(self.pantallas)
+        await self._rotar_pendientes()
+
+    async def _rotar_pendientes(self) -> None:
+        self._gracia_timer = None
+        self.pendientes &= set(self.pantallas)  # fuera los monitores desconectados
+        libres = [n for n in self.pendientes if n in self.pantallas and not self.pausado(self.pantallas[n])]
+        esperando = sorted(set(self.pendientes) - set(libres))
+        if esperando:
+            log.info("rotacion: espera hasta que se quite la pausa en %s", ", ".join(esperando))
+        if not libres:
+            return
+        asignaciones = self._siguientes(libres)
+        self.pendientes -= set(libres)
+        if not asignaciones:
+            return
+        log.info("rotacion: toca cambiar en %s", ", ".join(sorted(asignaciones)))
+        try:
+            async with self._lock:
+                await self._aplicar(asignaciones)
+        except (BackendError, ValueError) as e:
+            log.error("rotacion: no pude cambiar: %s", e)
+
+    def _revisar_pendientes(self) -> None:
+        """Tras cada cambio de pausa: si un monitor pendiente ya no esta en
+        pausa, cambia cuando lleve GRACIA_ROTACION_S asi."""
+        libre = any(n in self.pantallas and not self.pausado(self.pantallas[n]) for n in self.pendientes)
+        if libre and self._gracia_timer is None:
+            self._gracia_timer = asyncio.get_running_loop().call_later(
+                GRACIA_ROTACION_S, lambda: self._lanzar(self._rotar_pendientes()))
+        elif not libre and self._gracia_timer is not None:
+            self._gracia_timer.cancel()
+            self._gracia_timer = None
 
     # -------------------------------------------------------- pausa
 
@@ -372,7 +476,10 @@ class Daemon:
                 log.info("%s: pausado: %s", p.nombre, "; ".join(self.razones(p)))
             else:
                 log.info("%s: reanudado", p.nombre)
-
+        # Las razones de pausa cuentan tambien con imagenes fijas: un cambio
+        # de fondo recolorea GTK, Qt y kitty, y eso no se hace en mitad de un juego
+        if self.pendientes:
+            self._revisar_pendientes()
     async def _evaluar_pausa(self) -> None:
         try:
             await self._consultar_hyprland()
@@ -476,6 +583,8 @@ class Daemon:
             self.manual_pause = False
             log.info("pausa manual retirada")
             await self._sincronizar_pausa()
+        elif orden == "rotate":
+            await self.poner_rotacion(bool(p.get("enabled")))
         elif orden != "status":
             raise ValueError(f"orden desconocida: {orden!r}")
         return {"ok": True, "status": await self.status()}
@@ -504,7 +613,14 @@ class Daemon:
             monitores.append(m)
         return {"monitors": monitores, "palette_monitor": paleta,
                 "directory": str(self.cfg.directory),
-                "manual_pause": self.manual_pause, "on_battery": self.bateria}
+                "manual_pause": self.manual_pause, "on_battery": self.bateria,
+                "rotation": {
+                    "enabled": self.guardado.rotacion,
+                    "interval_minutes": self.cfg.rotation_minutes,
+                    "next_in_s": round(self._rotacion_hasta - asyncio.get_running_loop().time())
+                    if self._rotacion_hasta else None,
+                    "pending": sorted(self.pendientes),
+                }}
 
 
 # ------------------------------------------------------------ utilidades

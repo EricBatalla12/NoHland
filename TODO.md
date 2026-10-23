@@ -2,14 +2,14 @@
 
 Ideas apuntadas para no ampliar el alcance. Nada de esto está hecho.
 
-## Fase 3 (solo si se pide)
-- Rotación automática cada X minutos.
-
 ## Interfaz
 - Vista previa animada de los vídeos en la cuadrícula (al pasar el ratón).
 - Importar desde Wallpaper Engine: elegir entre tus suscripciones de tipo
   Vídeo y crear el enlace en la carpeta sin tocar la terminal.
 - Lista de webs de «Conseguir fondos» editable desde config.toml.
+- Rotación en orden aleatorio, no solo alfabético.
+- Que guardar los ajustes no reinicie el servicio (ver «Recargar config.toml»):
+  hoy cambiar el intervalo quita la pausa manual y reinicia los vídeos.
 - Widget en la barra de Noctalia (plugin en Luau) que abra la ventana.
 - Regla de Hyprland para que la ventana salga flotante y centrada.
 - Recargar la config sin reiniciar el servicio, para que guardar los ajustes

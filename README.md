@@ -24,6 +24,13 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 
   Todo por eventos (socket2 de Hyprland y uevents del kernel por netlink):
   sin sondeos, 0 % de CPU en reposo.
+- **Rotación automática** (interruptor en la ventana o `nohland rotate on`):
+  cada `interval_minutes` cada monitor pasa al siguiente fondo de su carpeta.
+  Un monitor en pausa no cambia: queda pendiente y cambia cuando lleva 30 s sin
+  pausa, para no recolorear el escritorio en mitad de un juego ni en un alt-tab.
+  Elegir un fondo a mano reinicia la cuenta. Es un único temporizador, así que
+  no cuesta nada entre cambios. Los fotogramas de todos los vídeos de la
+  carpeta se quedan en caché: sacar el de un 4K a 60 fps cuesta ~4 s de CPU.
 
 ## Interfaz
 
@@ -37,6 +44,9 @@ libadwaita que hace todo lo del CLI:
   El fondo en uso lleva la etiqueta «EN USO».
 - **Varios monitores**: selector en la barra y una fila por monitor. Con un
   solo monitor no aparece.
+- **Rotación**: interruptor junto a la colección con el intervalo y cuánto
+  falta; la portada muestra «Cambia en X min». El intervalo se cambia en
+  Ajustes.
 - **Conseguir fondos**: botón con enlaces a Wallhaven, Wallpaper Abyss,
   MoeWalls, MotionBGs y el Workshop de Wallpaper Engine. Solo abre la web en el
   navegador; lo que descargues en la carpeta aparece solo en la colección.
@@ -62,6 +72,7 @@ nohland next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabé
 nohland pause           # pausa manual
 nohland resume          # quita la pausa manual (la automática sigue mandando)
 nohland status          # qué suena, si está pausado y por qué (--json)
+nohland rotate on|off   # rotación automática (el intervalo, en config.toml)
 nohland gui             # la ventana
 ```
 

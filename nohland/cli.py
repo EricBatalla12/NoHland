@@ -42,6 +42,18 @@ def imprimir_estado(e: dict) -> None:
             # deteccion funciona y que el siguiente video arrancara en pausa.
             print(f"    · {razon}")
         print(f"  Carpeta: {m['directory']}")
+    r = e.get("rotation")
+    if r:
+        if not r["enabled"]:
+            print("Rotacion: apagada")
+        else:
+            linea = f"Rotacion: cada {r['interval_minutes']:g} min"
+            if r["next_in_s"] is not None:
+                m, s = divmod(max(r["next_in_s"], 0), 60)
+                linea += f" · siguiente cambio en {m} min {s:02d} s"
+            if r["pending"]:
+                linea += f" · esperando a que se quite la pausa en {', '.join(r['pending'])}"
+            print(linea)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
     sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
     sub.add_parser("resume", help="quita la pausa manual")
+    p_rot = sub.add_parser("rotate", help="enciende o apaga la rotacion automatica")
+    p_rot.add_argument("estado", choices=["on", "off"])
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
     p_status.add_argument("--json", action="store_true", help="salida en JSON")
     args = ap.parse_args(argv)
@@ -70,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         return gui_main()
 
     peticion = {"cmd": args.orden}
+    if args.orden == "rotate":
+        peticion["enabled"] = args.estado == "on"
     if getattr(args, "monitor", None):
         peticion["monitor"] = args.monitor
     if args.orden == "set":

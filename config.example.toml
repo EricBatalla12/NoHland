@@ -13,6 +13,12 @@ palette_monitor = ""
 # [monitors.DP-1]
 # directory = "~/Imágenes/NoHland/vertical"
 
+[rotation]
+# Cada cuantos minutos pasa al siguiente fondo de la carpeta cuando la
+# rotacion esta encendida (se enciende con el interruptor de la ventana o con
+# `nohland rotate on`). No cambia mientras haya algo en pausa: espera.
+interval_minutes = 15
+
 [video]
 # Decodificacion por hardware de mpv. En la RTX 5070 con el driver 615
 # funcionan nvdec (CUDA) y vulkan. "no" la desactiva.

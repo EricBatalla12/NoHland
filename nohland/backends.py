@@ -70,6 +70,12 @@ async def _salida(*args: str) -> tuple[int, str]:
     return proc.returncode, salida.decode(errors="replace").strip()
 
 
+def ruta_frame(video: Path) -> Path:
+    st = video.stat()
+    clave = hashlib.sha1(f"{video}|{st.st_size}|{st.st_mtime_ns}".encode()).hexdigest()[:12]
+    return FRAMES_DIR / f"{video.stem[:40]}-{clave}.jpg"
+
+
 async def extraer_frame(video: Path) -> Path:
     """Saca un fotograma del video para Noctalia y lo cachea.
 
@@ -77,9 +83,7 @@ async def extraer_frame(video: Path) -> Path:
     por ruta, asi que si el video cambia el fotograma tiene que cambiar de
     nombre. Repetir el mismo video reutiliza el fichero sin llamar a ffmpeg.
     """
-    st = video.stat()
-    clave = hashlib.sha1(f"{video}|{st.st_size}|{st.st_mtime_ns}".encode()).hexdigest()[:12]
-    destino = FRAMES_DIR / f"{video.stem[:40]}-{clave}.jpg"
+    destino = ruta_frame(video)
     if destino.exists():
         return destino
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,7 +109,11 @@ async def extraer_frame(video: Path) -> Path:
 
 
 def limpiar_frames(en_uso: set[Path]) -> None:
-    """Borra los fotogramas que ya no usa ningun monitor."""
+    """Borra los fotogramas que no estan en en_uso.
+
+    El daemon pasa los de todos los videos de las carpetas, no solo los que
+    suenan: con la rotacion se vuelve a ellos, y un 4K a 60 fps cuesta ~4 s
+    de CPU sacarlo otra vez."""
     if not FRAMES_DIR.is_dir():
         return
     for f in FRAMES_DIR.iterdir():

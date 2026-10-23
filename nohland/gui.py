@@ -75,6 +75,7 @@ flowboxchild:focus-visible .tarjeta { outline-color: alpha(@accent_bg_color, 0.6
 .insignia.en-uso { background: @accent_bg_color; color: @accent_fg_color; }
 flowboxchild { padding: 0; border-radius: 18px; background: none; }
 .monitor-fila image { border-radius: 8px; }
+.rotacion { padding: 6px 8px 6px 14px; border-radius: 14px; background: alpha(@window_fg_color, 0.06); }
 """
 
 
@@ -323,7 +324,7 @@ class Portada(Gtk.Overlay):
         self.add_overlay(abajo)
 
     def mostrar(self, monitor: dict | None, varios: bool, manual: bool, sin_daemon: bool,
-                hay_video: bool = False) -> None:
+                hay_video: bool = False, rotacion: dict | None = None) -> None:
         if sin_daemon:
             self._vacia("NoHland está parado", "Pulsa «Arrancar» arriba para volver a poner los fondos")
         elif not monitor or not monitor["current"]:
@@ -342,6 +343,11 @@ class Portada(Gtk.Overlay):
                     chips += [(f"En pausa · {r}", "pausa") for r in monitor["reasons"]]
                 else:
                     chips.append(("Reproduciendo", "acento"))
+            if rotacion and rotacion["enabled"] and rotacion["next_in_s"] is not None:
+                if monitor["name"] in rotacion["pending"]:
+                    chips.append(("Cambio pendiente: espera a que se quite la pausa", ""))
+                else:
+                    chips.append((f"Cambia en {_duracion(rotacion['next_in_s'])}", ""))
             if monitor.get("palette") and varios:
                 chips.append(("Paleta de Noctalia", ""))
             if monitor.get("error"):
@@ -439,8 +445,23 @@ class Ventana(Adw.ApplicationWindow):
         carpeta.add_css_class("flat")
         carpeta.connect("clicked", lambda *_: self._abrir_carpeta())
 
+        # Interruptor de la rotacion automatica
+        rotacion = Gtk.Box(spacing=10, valign=Gtk.Align.CENTER)
+        rotacion.add_css_class("rotacion")
+        rotacion.append(Gtk.Image(icon_name="media-playlist-repeat-symbolic"))
+        textos_rot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        textos_rot.append(_etiqueta("Rotación", "heading", xalign=0))
+        self.rotacion_info = _etiqueta("", "dim-label", "caption", xalign=0)
+        textos_rot.append(self.rotacion_info)
+        rotacion.append(textos_rot)
+        self.rotacion = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                   tooltip_text="Pasar al siguiente fondo cada cierto tiempo (el intervalo, en Ajustes)")
+        self._pintando_rotacion = False
+        self.rotacion.connect("notify::active", self._rotacion_cambiada)
+        rotacion.append(self.rotacion)
+
         barra = Gtk.Box(spacing=12)
-        for w in (titulo, self.filtro, self.busqueda, carpeta):
+        for w in (titulo, rotacion, self.filtro, self.busqueda, carpeta):
             barra.append(w)
 
         # --- cuadricula
@@ -527,6 +548,7 @@ class Ventana(Adw.ApplicationWindow):
             self.aviso.set_revealed(True)
             self.portada.mostrar(None, False, False, sin_daemon=True)
             self.lista_monitores.set_visible(False)
+            self._pintar_rotacion(None)
             self._actualizar_carpeta()
             self._marcar_actuales()
             return
@@ -560,7 +582,9 @@ class Ventana(Adw.ApplicationWindow):
         portada = next((m for m in e["monitors"] if m["name"] == elegido), None) or \
             next((m for m in e["monitors"] if m["palette"]), None)
         hay_video = any(m.get("backend") == "mpvpaper" for m in e["monitors"])
-        self.portada.mostrar(portada, len(nombres) > 1, e["manual_pause"], sin_daemon=False, hay_video=hay_video)
+        self.portada.mostrar(portada, len(nombres) > 1, e["manual_pause"], sin_daemon=False,
+                             hay_video=hay_video, rotacion=e.get("rotation"))
+        self._pintar_rotacion(e.get("rotation"))
         # Se pide una vez por fondo; si ffmpeg falla no se reintenta cada 2 s
         if portada and portada["current"] and self.portada.ruta != self._portada_pedida:
             self._portada_pedida = self.portada.ruta
@@ -569,6 +593,27 @@ class Ventana(Adw.ApplicationWindow):
         self._pintar_monitores(e["monitors"] if len(nombres) > 1 else [])
         self._actualizar_carpeta()
         self._marcar_actuales()
+
+    def _pintar_rotacion(self, r: dict | None) -> None:
+        self.rotacion.set_sensitive(r is not None)
+        if r is None:
+            self.rotacion_info.set_label("NoHland parado")
+            return
+        # Se marca para que poner el interruptor desde el estado no mande otra orden
+        self._pintando_rotacion = True
+        self.rotacion.set_active(r["enabled"])
+        self._pintando_rotacion = False
+        cada = _duracion(r["interval_minutes"] * 60)
+        if not r["enabled"]:
+            self.rotacion_info.set_label(f"Apagada · cada {cada}")
+        elif r["pending"]:
+            self.rotacion_info.set_label("Esperando: hay algo en pausa")
+        else:
+            self.rotacion_info.set_label(f"Cada {cada} · siguiente en {_duracion(r['next_in_s'] or 0)}")
+
+    def _rotacion_cambiada(self, interruptor, _param) -> None:
+        if not self._pintando_rotacion:
+            self.app.activate_action("rotacion", GLib.Variant("b", interruptor.get_active()))
 
     def _portada_lista(self, fichero: Path | None, origen: Path) -> None:
         if origen == self.portada.ruta:
@@ -695,6 +740,17 @@ class Ventana(Adw.ApplicationWindow):
             Gtk.FileLauncher(file=Gio.File.new_for_path(str(self.carpeta))).launch(self, None, None)
 
 
+def _duracion(segundos: float) -> str:
+    segundos = max(0, round(segundos))
+    if segundos < 60:
+        return f"{segundos} s"
+    minutos = round(segundos / 60)
+    if minutos < 60:
+        return f"{minutos} min"
+    h, m = divmod(minutos, 60)
+    return f"{h} h {m} min" if m else f"{h} h"
+
+
 def _describir(m: dict) -> str:
     if not m["current"]:
         return "sin fondo"
@@ -719,6 +775,7 @@ class Aplicacion(Adw.Application):
             "monitor": ("s", self._elegir_monitor),
             "filtro": ("s", lambda _a, p: self.ventana.filtro.set_active_name(p.get_string())),
             "buscar": ("s", lambda _a, p: self.ventana.busqueda.set_text(p.get_string())),
+            "rotacion": ("b", self._rotacion),
             "abrir": (None, self._abrir),
             "conseguir": (None, lambda *_: self.ventana.boton_webs.popup()),
             "web": ("s", self._web),
@@ -806,6 +863,11 @@ class Aplicacion(Adw.Application):
                 return  # cancelado
             self.activate_action("poner", GLib.Variant("s", fichero.get_path()))
         dialogo.open(self.ventana, None, elegido)
+
+    def _rotacion(self, _accion, parametro):
+        encendida = parametro.get_boolean()
+        self.orden({"cmd": "rotate", "enabled": encendida},
+                   "Rotación encendida" if encendida else "Rotación apagada")
 
     def _web(self, _accion, parametro):
         url = parametro.get_string()
