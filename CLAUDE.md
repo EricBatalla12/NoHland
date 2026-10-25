@@ -17,6 +17,13 @@ Lo de un equipo concreto (rutas, monitores, preferencias de trabajo) va en
 | Reproducción | `nohland/backends.py` | Imágenes → `noctalia msg wallpaper-set [monitor] ruta`. Vídeo/GIF → un `mpvpaper` por monitor en la capa `bottom`, controlado por el IPC de mpv. Fotograma de vídeos con ffmpeg para la paleta |
 | Otros | `hyprland.py`, `energia.py`, `greeter.py`, `miniaturas.py`, `actualizar.py`, `doctor.py`, `config.py` | Sockets de Hyprland; batería por netlink; fondo del greeter; miniaturas; buscar/instalar versiones; revisión del equipo; config |
 
+Funciones, por si hay que localizarlas: fondos fijos/vídeo/GIF por monitor,
+paleta desde fotograma, pausa (pantalla completa visible, ventana de juego
+activa, batería, manual guardada), rotación (tiempo, orden, excluidos), fondo
+por workspace, colores de Noctalia y fondo del greeter desde la ventana,
+aviso de versión nueva con «Actualizar» (`actualizar.py`), `nohland doctor`,
+`tools/preparar-greeter.sh` (sudo, una vez), icono en `data/`.
+
 Rutas en ejecución: config `~/.config/nohland/config.toml` (lo editable a mano y
 desde Ajustes), estado `~/.local/state/nohland/state.json` (fondo por monitor,
 rotación, greeter: lo que se cambia desde la ventana sin reiniciar), caché
