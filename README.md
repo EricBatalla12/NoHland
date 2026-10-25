@@ -25,6 +25,14 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 
   Todo por eventos (socket2 de Hyprland y uevents del kernel por netlink):
   sin sondeos, 0 % de CPU en reposo.
+- **Un fondo por workspace**: cada workspace de Hyprland puede tener su fondo
+  propio («Ponerlo solo en el workspace N» en el menú de una tarjeta, o
+  `nohland set -w <archivo>`); al cambiar de workspace se pone el suyo y, en
+  los que no tienen, el general del monitor. Elegir fondo, `next` o la rotación
+  cambian el propio si el workspace visible lo tiene y el general si no.
+  «Usar el fondo general» (en la portada) o `nohland workspace clear` lo quitan.
+  Cada cambio de workspace con fondo distinto recolorea el escritorio (la
+  paleta sigue al fondo) y, si es un vídeo, lo empieza desde el principio.
 - **Rotación automática** (interruptor en la ventana o `nohland rotate on`):
   cada N minutos cada monitor pasa a otro fondo de su carpeta, en orden o al
   azar, solo entre los que estén en la rotación. El tiempo, el orden y qué
@@ -91,6 +99,8 @@ nohland next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabé
 nohland pause           # pausa manual
 nohland resume          # quita la pausa manual (la automática sigue mandando)
 nohland status          # qué suena, si está pausado y por qué (--json)
+nohland set -w <archivo>        # solo en el workspace visible (fondo propio)
+nohland workspace clear # ese workspace vuelve al fondo general
 nohland rotate on|off   # rotación automática
 nohland rotate every 30 # cada 30 minutos
 nohland rotate order aleatorio   # o «orden»

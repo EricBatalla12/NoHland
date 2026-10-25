@@ -41,6 +41,8 @@ def imprimir_estado(e: dict) -> None:
             # Las razones se muestran aunque el fondo sea fijo: asi se ve que la
             # deteccion funciona y que el siguiente video arrancara en pausa.
             print(f"    · {razon}")
+        if m.get("workspace"):
+            print(f"  Workspace {m['workspace']}: " + ("fondo propio" if m.get("workspace_own") else "fondo general"))
         print(f"  Carpeta: {m['directory']}")
     g = e.get("greeter")
     if g:
@@ -77,8 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="revisa que el equipo tenga lo que NoHland necesita")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
+    p_set.add_argument("-w", "--workspace", action="store_true",
+                       help="solo en el workspace visible (su fondo propio)")
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
-    for p in (p_set, p_next):
+    p_ws = sub.add_parser("workspace", help="fondo propio del workspace visible",
+                          description="clear: el workspace visible vuelve a usar el fondo general del monitor")
+    p_ws.add_argument("accion", choices=["clear"])
+    for p in (p_set, p_next, p_ws):
         p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
     sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
     sub.add_parser("resume", help="quita la pausa manual")
@@ -108,7 +115,9 @@ def main(argv: list[str] | None = None) -> int:
         from .gui import main as gui_main
         return gui_main()
 
-    peticion = {"cmd": args.orden}
+    peticion = {"cmd": "workspace-clear" if args.orden == "workspace" else args.orden}
+    if getattr(args, "workspace", False):
+        peticion["workspace"] = True
     if args.orden == "rotate":
         accion, valor = args.accion, args.valor
         if accion in ("on", "off"):

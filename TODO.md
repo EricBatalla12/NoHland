@@ -5,10 +5,10 @@ Cada una lleva lo que aporta y lo que costaría (poco / medio / mucho).
 
 ## Recomendadas para la próxima tanda
 
-1. **Un fondo por workspace.** Al cambiar de workspace en Hyprland cambia el
-   fondo (el 1 con uno, el 2 con otro...). Ya se escucha `workspacev2` en
-   socket2, así que no gasta nada más. Es lo más «Hyprland» que puede tener.
-   Coste: medio.
+1. **Que el vídeo de cada workspace no empiece de cero.** Con fondo por
+   workspace, al volver a un workspace con vídeo se arranca otro mpvpaper
+   desde el principio. Se podría recordar la posición (`start=`) o dejar vivo
+   y oculto el de cada workspace. Coste: medio.
 2. **Fondos de día y de noche.** Dos listas, o etiquetas en cada fondo, y
    cambio a la hora que digas (o al cambiar Noctalia entre claro y oscuro con
    el hook `theme_mode_changed`). Coste: medio.
@@ -62,12 +62,8 @@ Cada una lleva lo que aporta y lo que costaría (poco / medio / mucho).
 - Rotación distinta por monitor (tiempo y fondos propios).
 
 ## Integración con el escritorio
-- Llevar a NoHland lo que hacía wallpaper.sh al cambiar de fondo: copiar al
-  greeter, logo de fastfetch y color de OpenRGB. Encaja con el hook
-  `wallpaper_changed` de Noctalia.
-- Escenas de Wallpaper Engine (linux-wallpaperengine) como tercer backend, para
-  retirar wallpaper.sh del todo. Hoy SUPER+ALT+W lo sigue lanzando y, si se
-  usa, se apila con mpvpaper en la capa bottom.
+- Escenas de Wallpaper Engine (linux-wallpaperengine) como tercer backend: hoy
+  solo sirven los fondos de tipo Vídeo del Workshop.
 - El selector de fondos de Noctalia (SUPER+SHIFT+W) cambia el fondo de Noctalia
   por debajo de NoHland sin que NoHland se entere.
 - Elegir el esquema de color de la paleta (m3-content, vibrant...) por fondo, o

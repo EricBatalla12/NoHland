@@ -46,6 +46,13 @@ Servicio: `systemd/nohland.service`, que `install.sh` **copia** (no enlaza).
 - **Python 3.14 / zsh:** en los scripts de prueba no usar `md` como nombre de
   función (es alias de mkdir en el shell que usa la herramienta) ni f-strings
   con comillas escapadas dentro de `python3 -c '…'`.
+- **Arranque de sesión:** Noctalia acepta el `wallpaper-set` (responde ok) aunque
+  aún se esté iniciando y luego carga su fondo guardado encima. Por eso el
+  daemon vuelve a comprobar con `wallpaper-get` el primer medio minuto
+  (`_vigilar_noctalia_al_arrancar`).
+- **Fondo por workspace:** `_deseado()` = el propio del workspace visible o el
+  general del monitor; `_repartir()` decide dónde se guarda cada cambio;
+  `_aplicar(..., generales=)` no toca el general con el fondo de un workspace.
 - Noctalia: `noctalia msg color-scheme-get|set`, `settings-open templates`
   (abre Plantillas), hooks en `[hooks]` (`wallpaper_changed` con
   `NOCTALIA_WALLPAPER_PATH`, `colors_changed`).

@@ -587,9 +587,16 @@ class Portada(Gtk.Overlay):
         self.etiqueta = _etiqueta("", "portada-etiqueta", xalign=0)
         self.titulo = _etiqueta("", "portada-titulo", xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.chips = Gtk.Box(spacing=6, margin_top=6)
+        # Con fondo propio del workspace: volver al general del monitor
+        self.usar_general = Gtk.Button(label="Usar el fondo general", action_name="app.workspace-general",
+                                       halign=Gtk.Align.START, visible=False,
+                                       tooltip_text="Este workspace deja de tener fondo propio")
+        self.usar_general.add_css_class("chip")
+        self.usar_general.add_css_class("flat")
         textos.append(self.etiqueta)
         textos.append(self.titulo)
         textos.append(self.chips)
+        textos.append(self.usar_general)
         abajo.append(textos)
 
         botones = Gtk.Box(spacing=14, valign=Gtk.Align.END)
@@ -631,11 +638,14 @@ class Portada(Gtk.Overlay):
                     chips.append(("Cambio pendiente: espera a que se quite la pausa", ""))
                 else:
                     chips.append((f"Cambia en {_duracion(rotacion['next_in_s'])}", ""))
+            if monitor.get("workspace_own"):
+                chips.append((f"Fondo propio del workspace {monitor['workspace']}", "acento"))
             if monitor.get("palette") and varios:
                 chips.append(("Paleta de Noctalia", ""))
             if monitor.get("error"):
                 chips.append((monitor["error"], "pausa"))
             self._poner_chips(chips)
+            self.usar_general.set_visible(bool(monitor.get("workspace_own")))
             if ruta != self.ruta:
                 self.ruta = ruta
                 self.cubierta.poner(None)
@@ -647,6 +657,7 @@ class Portada(Gtk.Overlay):
         self.siguiente.set_sensitive(not sin_daemon)
 
     def _vacia(self, titulo: str, texto: str) -> None:
+        self.usar_general.set_visible(False)
         self.ruta = None
         self.cubierta.poner(None)
         self.velo.add_css_class("portada-vacia")
@@ -1105,6 +1116,15 @@ class Ventana(Adw.ApplicationWindow):
             item = Gio.MenuItem.new(texto, None)
             item.set_action_and_target_value("app.poner-en", GLib.Variant("(ss)", (monitor, ruta)))
             poner.append_item(item)
+        # Solo en el workspace que se ve (en el monitor elegido o, con «Todos»,
+        # en el de la paleta)
+        estado = self.estado or {}
+        ref = next((m for m in estado.get("monitors", []) if m["name"] == self.monitor_elegido()), None) or \
+            next((m for m in estado.get("monitors", []) if m["palette"]), None)
+        if ref and ref.get("workspace"):
+            item = Gio.MenuItem.new(f"Ponerlo solo en el workspace {ref['workspace']}", None)
+            item.set_action_and_target_value("app.poner-workspace", GLib.Variant("s", ruta))
+            poner.append_item(item)
         menu.append_section(None, poner)
         otros = Gio.Menu()
         dentro = getattr(tarjeta, "en_rotacion", True)
@@ -1181,6 +1201,9 @@ class Aplicacion(Adw.Application):
             "rotacion-todos": ("b", self._rotacion_todos),
             "rotacion-elegir": ("b", lambda _a, p: self.ventana.elegir_rotacion(p.get_boolean())),
             "poner-en": ("(ss)", self._poner_en),
+            "poner-workspace": ("s", self._poner_workspace),
+            "workspace-general": (None, lambda *_: self.orden(
+                self._con_monitor({"cmd": "workspace-clear"}), "El workspace vuelve al fondo general")),
             "mostrar": ("s", self._mostrar),
             "papelera": ("s", self._papelera),
             "colores": ("b", self._colores),
@@ -1292,6 +1315,12 @@ class Aplicacion(Adw.Application):
             peticion["monitor"] = monitor
         self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
         self.orden(peticion, f"{Path(ruta).name} en {monitor or 'todos los monitores'}")
+
+    def _poner_workspace(self, _accion, parametro):
+        ruta = parametro.get_string()
+        self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
+        self.orden(self._con_monitor({"cmd": "set", "path": ruta, "workspace": True}),
+                   f"{Path(ruta).name}: fondo propio de este workspace")
 
     def _mostrar(self, _accion, parametro):
         Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(

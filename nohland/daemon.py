@@ -22,6 +22,12 @@ pausa no cambia: queda pendiente y cambia cuando lleva GRACIA_ROTACION_S sin
 pausa, para no hacerlo en un alt-tab de dos segundos fuera de un juego. Poner
 un fondo a mano reinicia la cuenta.
 
+Fondo por workspace: un workspace puede tener fondo propio (state.json,
+por nombre de workspace). Al cambiar de workspace cada monitor pone el propio
+del workspace visible o, si no tiene, el general del monitor. Elegir fondo
+(set, next, rotacion) cambia el propio si el workspace visible lo tiene y el
+general si no: asi el cambio siempre se ve.
+
 Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
 manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
 ventana a pantalla completa en el workspace visible de ESE monitor). `resume`
@@ -86,6 +92,8 @@ class Pantalla:
     # Razon de pausa propia de este monitor (ventana a pantalla completa)
     pantalla_completa: str | None = None
     error: str | None = None
+    # Nombre del workspace visible en este monitor
+    workspace: str | None = None
 
 
 @dataclass
@@ -108,6 +116,8 @@ class Guardado:
     # La pausa manual sobrevive a reiniciar el servicio (guardar ajustes,
     # actualizar, iniciar sesion): antes se perdia en cada uno
     pausa_manual: bool = False
+    # Fondo propio de cada workspace, por nombre ("1", "2", "gaming"...)
+    workspaces: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -127,6 +137,7 @@ class Guardado:
             greeter_modo=datos.get("greeter_mode", "no"),
             greeter_imagen=datos.get("greeter_image"),
             pausa_manual=bool(datos.get("manual_pause", False)),
+            workspaces=dict(datos.get("workspaces", {})),
         )
 
     def escribir(self) -> None:
@@ -142,6 +153,7 @@ class Guardado:
             "greeter_mode": self.greeter_modo,
             "greeter_image": self.greeter_imagen,
             "manual_pause": self.pausa_manual,
+            "workspaces": self.workspaces,
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -234,13 +246,37 @@ class Daemon:
         log.info("parado")
 
     def _fondo_guardado(self, monitor: str) -> Path | None:
+        """El fondo general del monitor (sin contar el de su workspace)."""
         return self.guardado.monitores.get(monitor) or self.guardado.ultimo
+
+    def _propio(self, p: Pantalla) -> Path | None:
+        ruta = self.guardado.workspaces.get(p.workspace) if p.workspace else None
+        return Path(ruta) if ruta else None
+
+    def _deseado(self, monitor: str) -> Path | None:
+        """Lo que deberia verse: el del workspace visible o el general."""
+        return self._propio(self.pantallas[monitor]) or self._fondo_guardado(monitor)
+
+    def _repartir(self, asignaciones: dict[str, Path], solo_workspace: bool = False) -> set[str]:
+        """Decide donde se guarda cada cambio: en el fondo propio del workspace
+        visible (si ya lo tiene, o si se pide con solo_workspace) o en el
+        general del monitor. Devuelve los monitores cuyo general cambia."""
+        generales = set()
+        for nombre, path in asignaciones.items():
+            ws = self.pantallas[nombre].workspace
+            if ws and (solo_workspace or ws in self.guardado.workspaces):
+                self.guardado.workspaces[ws] = str(path)
+            else:
+                generales.add(nombre)
+        return generales
 
     async def _restaurar(self, monitores: list[str], intentos: int = 1) -> None:
         """Vuelve a poner en estos monitores lo que tenian guardado."""
-        asignaciones = {}
+        asignaciones, generales = {}, set()
         for nombre in monitores:
-            fondo = self._fondo_guardado(nombre)
+            fondo = self._deseado(nombre)
+            if not self._propio(self.pantallas[nombre]):
+                generales.add(nombre)
             if fondo is None:
                 log.info("%s: sin fondo guardado; espero a `nohland set` o `nohland next`", nombre)
             elif not fondo.is_file():
@@ -249,7 +285,7 @@ class Daemon:
                 asignaciones[nombre] = fondo
         if asignaciones:
             try:
-                await self._aplicar(asignaciones, intentos)
+                await self._aplicar(asignaciones, intentos, generales=generales)
             except (BackendError, ValueError) as e:
                 log.error("no pude restaurar los fondos: %s", e)
 
@@ -330,7 +366,7 @@ class Daemon:
             raise ValueError(f"monitor desconocido: {monitor} (conectados: {', '.join(self.pantallas)})")
         return [monitor]
 
-    async def set(self, path: Path, monitor: str | None) -> None:
+    async def set(self, path: Path, monitor: str | None, solo_workspace: bool = False) -> None:
         # abspath y no resolve(): si la carpeta tiene enlaces simbolicos, la
         # ruta debe seguir coincidiendo con la de _lista() para que next avance
         path = Path(os.path.abspath(path.expanduser()))
@@ -339,8 +375,9 @@ class Daemon:
         if tipo_de(path) is None:
             raise ValueError(f"formato no soportado: {path.suffix or '(sin extension)'}")
         destinos = self._destinos(monitor)
+        asignaciones = {m: path for m in destinos}
         async with self._lock:
-            await self._aplicar({m: path for m in destinos})
+            await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace))
         self._cambio_manual(destinos)
 
     async def next(self, monitor: str | None) -> None:
@@ -351,7 +388,7 @@ class Daemon:
             if nombre not in asignaciones:
                 raise ValueError(f"no hay fondos en {config.directorio_de(self.cfg, nombre)}")
         async with self._lock:
-            await self._aplicar(asignaciones)
+            await self._aplicar(asignaciones, generales=self._repartir(asignaciones))
         self._cambio_manual(destinos)
 
     def _siguientes(self, monitores, rotacion: bool = False) -> dict[str, Path]:
@@ -392,7 +429,8 @@ class Daemon:
             asignaciones[nombre] = lista[i % len(lista)]
         return asignaciones
 
-    async def _aplicar(self, asignaciones: dict[str, Path], intentos: int = 1) -> None:
+    async def _aplicar(self, asignaciones: dict[str, Path], intentos: int = 1,
+                       generales: set[str] | None = None) -> None:
         """Pone asignaciones[monitor] en cada monitor. Llamar con _lock cogido."""
         # 1) Un fotograma por video distinto, aunque vaya a varios monitores
         frames: dict[Path, Path | None] = {}
@@ -447,7 +485,10 @@ class Daemon:
         for nombre, path in asignaciones.items():
             p = self.pantallas[nombre]
             p.actual = path
-            self.guardado.monitores[nombre] = path
+            # generales: monitores cuyo fondo general cambia (None = todos). Con
+            # el fondo de un workspace, el general del monitor no se toca
+            if generales is None or nombre in generales:
+                self.guardado.monitores[nombre] = path
             extra = f", mpvpaper pid {p.player.proc.pid}" if p.player else ""
             pausa = ", en pausa" if p.player and self.pausado(p) else ""
             log.info("%s: %s [%s%s%s]", nombre, path, tipo_de(path), extra, pausa)
@@ -621,7 +662,7 @@ class Daemon:
         log.info("rotacion: toca cambiar en %s", ", ".join(sorted(asignaciones)))
         try:
             async with self._lock:
-                await self._aplicar(asignaciones)
+                await self._aplicar(asignaciones, generales=self._repartir(asignaciones))
         except (BackendError, ValueError) as e:
             log.error("rotacion: no pude cambiar: %s", e)
 
@@ -678,15 +719,62 @@ class Daemon:
             log.warning("no pude consultar Hyprland: %s", e)
             return
         await self._sincronizar_pausa()
+        await self._sincronizar_workspaces()
+
+    async def _sincronizar_workspaces(self) -> None:
+        """Pone en cada monitor el fondo del workspace visible (o el general).
+
+        Solo hace algo si lo que se ve no es lo que toca, es decir, al pasar a
+        un workspace con fondo propio o al salir de el. Sin fondos propios no
+        cambia nada.
+        """
+        cambios = {}
+        for nombre, p in self.pantallas.items():
+            if p.actual is None:
+                continue  # aun sin restaurar: de eso se encarga _restaurar
+            deseado = self._deseado(nombre)
+            if deseado and deseado != p.actual and deseado.is_file():
+                cambios[nombre] = deseado
+        if not cambios:
+            return
+        async with self._lock:
+            # Puede haberse movido mientras se esperaba el cerrojo
+            cambios = {n: f for n, f in cambios.items() if n in self.pantallas and f != self.pantallas[n].actual}
+            if cambios:
+                try:
+                    await self._aplicar(cambios, generales=set())
+                except (BackendError, ValueError) as e:
+                    log.error("workspace: no pude cambiar el fondo: %s", e)
+                    return
+        for n in cambios:
+            log.info("%s: workspace %s -> %s", n, self.pantallas[n].workspace,
+                     "fondo propio" if self._propio(self.pantallas[n]) else "fondo general")
+
+    async def quitar_propio(self, monitor: str | None) -> None:
+        """El workspace visible vuelve a usar el fondo general del monitor."""
+        quitados = []
+        for nombre in self._destinos(monitor):
+            ws = self.pantallas[nombre].workspace
+            if ws and self.guardado.workspaces.pop(ws, None):
+                quitados.append(ws)
+        if not quitados:
+            raise ValueError("el workspace visible no tiene fondo propio")
+        self.guardado.escribir()
+        log.info("workspace %s: vuelve al fondo general", ", ".join(quitados))
+        await self._sincronizar_workspaces()
 
     async def _consultar_hyprland(self) -> None:
         completas: dict[str, str] = {}
+        monitores = await self.hypr.query("monitors")
+        for m in monitores:
+            if m["name"] in self.pantallas:
+                self.pantallas[m["name"]].workspace = m["activeWorkspace"]["name"]
         if self.cfg.pause_on_fullscreen:
             # Solo cuenta lo visible: el workspace activo de cada monitor y el
             # especial si esta abierto. Una ventana a pantalla completa en un
             # workspace escondido no tapa el fondo.
             visibles = {}
-            for m in await self.hypr.query("monitors"):
+            for m in monitores:
                 visibles[m["activeWorkspace"]["id"]] = m["name"]
                 especial = m.get("specialWorkspace", {}).get("id", 0)
                 if especial:
@@ -763,7 +851,9 @@ class Daemon:
         orden = p.get("cmd")
         monitor = p.get("monitor")
         if orden == "set":
-            await self.set(Path(p["path"]), monitor)
+            await self.set(Path(p["path"]), monitor, solo_workspace=bool(p.get("workspace")))
+        elif orden == "workspace-clear":
+            await self.quitar_propio(monitor)
         elif orden == "next":
             await self.next(monitor)
         elif orden == "pause":
@@ -804,6 +894,8 @@ class Daemon:
                 "reasons": self.razones(p),
                 "directory": str(config.directorio_de(self.cfg, p.nombre)),
                 "error": p.error,
+                "workspace": p.workspace,
+                "workspace_own": bool(self._propio(p)),
             }
             if p.player and p.player.alive:
                 info = await p.player.info()
@@ -812,6 +904,7 @@ class Daemon:
             monitores.append(m)
         return {"monitors": monitores, "palette_monitor": paleta,
                 "directory": str(self.cfg.directory),
+                "workspaces": dict(self.guardado.workspaces),
                 "manual_pause": self.manual_pause, "on_battery": self.bateria,
                 "rotation": {
                     "enabled": self.guardado.rotacion,
