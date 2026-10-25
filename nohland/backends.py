@@ -57,6 +57,16 @@ async def noctalia_set(path: Path, monitor: str | None = None, intentos: int = 1
     raise BackendError(f"noctalia msg wallpaper-set fallo: {ultimo or 'sin salida'}")
 
 
+async def noctalia_get(monitor: str) -> str | None:
+    """La imagen que Noctalia tiene de verdad en ese monitor."""
+    proc = await asyncio.create_subprocess_exec(
+        "noctalia", "msg", "wallpaper-get", monitor,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    salida, _ = await proc.communicate()
+    return salida.decode(errors="replace").strip() or None if proc.returncode == 0 else None
+
+
 # ------------------------------------------------------------ fotograma
 
 FRAMES_DIR = CACHE_DIR / "frames"

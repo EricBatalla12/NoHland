@@ -105,6 +105,9 @@ class Guardado:
     # paleta), "fija" (greeter_imagen) o "no" (no se toca)
     greeter_modo: str = "no"
     greeter_imagen: str | None = None
+    # La pausa manual sobrevive a reiniciar el servicio (guardar ajustes,
+    # actualizar, iniciar sesion): antes se perdia en cada uno
+    pausa_manual: bool = False
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -123,6 +126,7 @@ class Guardado:
             rotacion_excluidos=set(datos.get("rotation_excluded", [])),
             greeter_modo=datos.get("greeter_mode", "no"),
             greeter_imagen=datos.get("greeter_image"),
+            pausa_manual=bool(datos.get("manual_pause", False)),
         )
 
     def escribir(self) -> None:
@@ -137,6 +141,7 @@ class Guardado:
             "rotation_excluded": sorted(self.rotacion_excluidos),
             "greeter_mode": self.greeter_modo,
             "greeter_image": self.greeter_imagen,
+            "manual_pause": self.pausa_manual,
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -147,7 +152,7 @@ class Daemon:
         self.hypr = Hyprland()
         self.pantallas: dict[str, Pantalla] = {}
         self.guardado = Guardado.leer()
-        self.manual_pause = False
+        self.manual_pause = self.guardado.pausa_manual
         self.juego: str | None = None
         self.bateria = False
         self._lock = asyncio.Lock()
@@ -193,6 +198,8 @@ class Daemon:
         for m in await self.hypr.query("monitors"):
             self.pantallas[m["name"]] = Pantalla(m["name"], m["id"])
         log.info("monitores: %s; paleta desde %s", ", ".join(self.pantallas), self.monitor_paleta())
+        if self.manual_pause:
+            log.info("pausa manual: sigue puesta de la sesion anterior")
 
         if self.cfg.pause_on_battery:
             self._actualizar_bateria(inicial=True)
@@ -200,6 +207,7 @@ class Daemon:
         # Al iniciar sesion Noctalia puede tardar en aparecer: hasta 20 s
         async with self._lock:
             await self._restaurar(list(self.pantallas), intentos=20)
+        self._lanzar(self._vigilar_noctalia_al_arrancar())
 
         if self.guardado.rotacion:
             log.info("rotacion: encendida, cada %g min", self.minutos_rotacion)
@@ -244,6 +252,39 @@ class Daemon:
                 await self._aplicar(asignaciones, intentos)
             except (BackendError, ValueError) as e:
                 log.error("no pude restaurar los fondos: %s", e)
+
+    async def _vigilar_noctalia_al_arrancar(self) -> None:
+        """Comprueba que Noctalia se ha quedado con los fondos de NoHland.
+
+        Al iniciar sesion Noctalia y NoHland arrancan casi a la vez: Noctalia
+        acepta el wallpaper-set (responde ok) pero, si aun se esta iniciando,
+        luego carga el fondo que tenia guardado y lo pisa (pasaba: NoHland
+        decia gw1vrl y en pantalla estaba el de la sesion anterior). Se mira
+        unas cuantas veces durante el primer medio minuto y se repite el
+        wallpaper-set donde no coincida, con el monitor de la paleta el ultimo.
+        """
+        for espera in (2, 3, 5, 10, 10):
+            await asyncio.sleep(espera)
+            paleta = self.monitor_paleta()
+            distintos = []
+            for nombre, p in self.pantallas.items():
+                if p.imagen_noctalia and await backends.noctalia_get(nombre) != str(p.imagen_noctalia):
+                    distintos.append(nombre)
+            if not distintos:
+                continue
+            # Si se repite otro, la paleta se iria a el: el de la paleta, el ultimo
+            orden = sorted(distintos, key=lambda n: n == paleta)
+            if paleta and paleta not in orden and self.pantallas[paleta].imagen_noctalia:
+                orden.append(paleta)
+            async with self._lock:
+                for nombre in orden:
+                    p = self.pantallas.get(nombre)
+                    if p and p.imagen_noctalia:
+                        try:
+                            await backends.noctalia_set(p.imagen_noctalia, nombre)
+                        except BackendError as e:
+                            log.warning("%s: no pude repetir el fondo en Noctalia: %s", nombre, e)
+            log.info("Noctalia habia cambiado el fondo de %s al arrancar; repuesto", ", ".join(distintos))
 
     # -------------------------------------------------------- monitores
 
@@ -726,11 +767,13 @@ class Daemon:
         elif orden == "next":
             await self.next(monitor)
         elif orden == "pause":
-            self.manual_pause = True
+            self.manual_pause = self.guardado.pausa_manual = True
+            self.guardado.escribir()
             log.info("pausa manual pedida")
             await self._sincronizar_pausa()
         elif orden == "resume":
-            self.manual_pause = False
+            self.manual_pause = self.guardado.pausa_manual = False
+            self.guardado.escribir()
             log.info("pausa manual retirada")
             await self._sincronizar_pausa()
         elif orden == "rotate":
