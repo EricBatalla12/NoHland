@@ -1125,6 +1125,12 @@ class Ventana(Adw.ApplicationWindow):
             item = Gio.MenuItem.new(f"Ponerlo solo en el workspace {ref['workspace']}", None)
             item.set_action_and_target_value("app.poner-workspace", GLib.Variant("s", ruta))
             poner.append_item(item)
+        # Con fondo propio en el workspace, poner un fondo cambia el propio; esto
+        # cambia el general (el de los workspaces sin fondo propio)
+        if any(m.get("workspace_own") for m in estado.get("monitors", [])):
+            item = Gio.MenuItem.new("Ponerlo de fondo general", None)
+            item.set_action_and_target_value("app.poner-general", GLib.Variant("s", ruta))
+            poner.append_item(item)
         menu.append_section(None, poner)
         otros = Gio.Menu()
         dentro = getattr(tarjeta, "en_rotacion", True)
@@ -1202,6 +1208,7 @@ class Aplicacion(Adw.Application):
             "rotacion-elegir": ("b", lambda _a, p: self.ventana.elegir_rotacion(p.get_boolean())),
             "poner-en": ("(ss)", self._poner_en),
             "poner-workspace": ("s", self._poner_workspace),
+            "poner-general": ("s", self._poner_general),
             "workspace-general": (None, lambda *_: self.orden(
                 self._con_monitor({"cmd": "workspace-clear"}), "El workspace vuelve al fondo general")),
             "mostrar": ("s", self._mostrar),
@@ -1321,6 +1328,12 @@ class Aplicacion(Adw.Application):
         self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
         self.orden(self._con_monitor({"cmd": "set", "path": ruta, "workspace": True}),
                    f"{Path(ruta).name}: fondo propio de este workspace")
+
+    def _poner_general(self, _accion, parametro):
+        ruta = parametro.get_string()
+        self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
+        self.orden(self._con_monitor({"cmd": "set", "path": ruta, "general": True}),
+                   f"{Path(ruta).name}: fondo general")
 
     def _mostrar(self, _accion, parametro):
         Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(

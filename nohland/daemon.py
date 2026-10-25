@@ -26,7 +26,9 @@ Fondo por workspace: un workspace puede tener fondo propio (state.json,
 por nombre de workspace). Al cambiar de workspace cada monitor pone el propio
 del workspace visible o, si no tiene, el general del monitor. Elegir fondo
 (set, next, rotacion) cambia el propio si el workspace visible lo tiene y el
-general si no: asi el cambio siempre se ve.
+general si no: asi el cambio siempre se ve. `set` con general=True cambia
+el general aunque el workspace visible tenga el suyo; ahi solo se guarda y se
+vera al pasar a un workspace sin fondo propio.
 
 Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
 manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
@@ -366,7 +368,8 @@ class Daemon:
             raise ValueError(f"monitor desconocido: {monitor} (conectados: {', '.join(self.pantallas)})")
         return [monitor]
 
-    async def set(self, path: Path, monitor: str | None, solo_workspace: bool = False) -> None:
+    async def set(self, path: Path, monitor: str | None, solo_workspace: bool = False,
+                  general: bool = False) -> None:
         # abspath y no resolve(): si la carpeta tiene enlaces simbolicos, la
         # ruta debe seguir coincidiendo con la de _lista() para que next avance
         path = Path(os.path.abspath(path.expanduser()))
@@ -377,8 +380,26 @@ class Daemon:
         destinos = self._destinos(monitor)
         asignaciones = {m: path for m in destinos}
         async with self._lock:
-            await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace))
+            if general:
+                await self._poner_general(asignaciones)
+            else:
+                await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace))
         self._cambio_manual(destinos)
+
+    async def _poner_general(self, asignaciones: dict[str, Path]) -> None:
+        """Cambia el fondo general sin tocar los propios de los workspaces.
+        Solo se pone a la vista donde el workspace visible no tiene el suyo;
+        en el resto queda guardado. Llamar con _lock cogido."""
+        visibles = {n: f for n, f in asignaciones.items() if not self._propio(self.pantallas[n])}
+        for nombre, path in asignaciones.items():
+            if nombre not in visibles:
+                self.guardado.monitores[nombre] = path
+                log.info("%s: fondo general -> %s (se vera fuera del workspace %s)",
+                         nombre, path, self.pantallas[nombre].workspace)
+        if visibles:
+            await self._aplicar(visibles, generales=set(visibles))
+        else:
+            self.guardado.escribir()
 
     async def next(self, monitor: str | None) -> None:
         """Cada monitor avanza por su propia carpeta."""
@@ -851,7 +872,8 @@ class Daemon:
         orden = p.get("cmd")
         monitor = p.get("monitor")
         if orden == "set":
-            await self.set(Path(p["path"]), monitor, solo_workspace=bool(p.get("workspace")))
+            await self.set(Path(p["path"]), monitor, solo_workspace=bool(p.get("workspace")),
+                           general=bool(p.get("general")))
         elif orden == "workspace-clear":
             await self.quitar_propio(monitor)
         elif orden == "next":
