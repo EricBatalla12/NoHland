@@ -26,10 +26,8 @@ Fondo por workspace: un workspace puede tener fondo propio (state.json,
 por nombre de workspace). Al cambiar de workspace cada monitor pone el propio
 del workspace visible o, si no tiene, el general del monitor. Elegir fondo
 (set, next, rotacion) cambia el propio si el workspace visible lo tiene y el
-general si no: asi el cambio siempre se ve. `set` con general=True cambia
-el general y el workspace visible deja su fondo propio, para que se vea ya (si
-solo se guardara, en un workspace con fondo propio no cambiaria nada en
-pantalla y pareceria que el boton no funciona).
+general si no: asi el cambio siempre se ve. `set` con general=True lo pone
+como general y todos los workspaces dejan su fondo propio: queda ese en todos.
 
 Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
 manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
@@ -387,14 +385,18 @@ class Daemon:
             else:
                 await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace))
         self._cambio_manual(destinos)
+        if general:
+            # Con -m, otro monitor puede estar en un workspace que acaba de
+            # perder su fondo propio: que pase a su general
+            await self._sincronizar_workspaces()
 
     async def _poner_general(self, asignaciones: dict[str, Path]) -> None:
-        """Cambia el fondo general y el workspace visible deja su fondo propio
-        (los demas workspaces conservan el suyo). Llamar con _lock cogido."""
-        for nombre in asignaciones:
-            ws = self.pantallas[nombre].workspace
-            if ws and self.guardado.workspaces.pop(ws, None):
-                log.info("workspace %s: deja su fondo propio y usa el general", ws)
+        """Cambia el fondo general y todos los workspaces dejan su fondo propio,
+        para que se vea ese en todos. Llamar con _lock cogido."""
+        if self.guardado.workspaces:
+            log.info("workspaces %s: dejan su fondo propio y usan el general",
+                     ", ".join(sorted(self.guardado.workspaces)))
+            self.guardado.workspaces.clear()
         await self._aplicar(asignaciones, generales=set(asignaciones))
 
     async def next(self, monitor: str | None) -> None:
