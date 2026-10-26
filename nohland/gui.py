@@ -1126,7 +1126,7 @@ class Ventana(Adw.ApplicationWindow):
             item.set_action_and_target_value("app.poner-workspace", GLib.Variant("s", ruta))
             poner.append_item(item)
         # Con fondo propio en el workspace, poner un fondo cambia el propio; esto
-        # cambia el general (el de los workspaces sin fondo propio)
+        # cambia el general y el workspace visible deja el suyo
         if any(m.get("workspace_own") for m in estado.get("monitors", [])):
             item = Gio.MenuItem.new("Ponerlo de fondo general", None)
             item.set_action_and_target_value("app.poner-general", GLib.Variant("s", ruta))
@@ -1333,7 +1333,7 @@ class Aplicacion(Adw.Application):
         ruta = parametro.get_string()
         self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
         self.orden(self._con_monitor({"cmd": "set", "path": ruta, "general": True}),
-                   f"{Path(ruta).name}: fondo general")
+                   f"{Path(ruta).name}: fondo general (este workspace deja el suyo)")
 
     def _mostrar(self, _accion, parametro):
         Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(

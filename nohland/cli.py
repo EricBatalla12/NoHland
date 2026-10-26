@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     solo.add_argument("-w", "--workspace", action="store_true",
                       help="solo en el workspace visible (su fondo propio)")
     solo.add_argument("-g", "--general", action="store_true",
-                      help="como fondo general, aunque el workspace visible tenga el suyo")
+                      help="como fondo general; el workspace visible deja su fondo propio")
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
     p_ws = sub.add_parser("workspace", help="fondo propio del workspace visible",
                           description="clear: el workspace visible vuelve a usar el fondo general del monitor")

@@ -27,8 +27,9 @@ por nombre de workspace). Al cambiar de workspace cada monitor pone el propio
 del workspace visible o, si no tiene, el general del monitor. Elegir fondo
 (set, next, rotacion) cambia el propio si el workspace visible lo tiene y el
 general si no: asi el cambio siempre se ve. `set` con general=True cambia
-el general aunque el workspace visible tenga el suyo; ahi solo se guarda y se
-vera al pasar a un workspace sin fondo propio.
+el general y el workspace visible deja su fondo propio, para que se vea ya (si
+solo se guardara, en un workspace con fondo propio no cambiaria nada en
+pantalla y pareceria que el boton no funciona).
 
 Pausa: un video esta pausado si hay CUALQUIER motivo. Unos son globales (pausa
 manual, juego en la ventana activa, bateria) y otro es de cada monitor (una
@@ -387,19 +388,13 @@ class Daemon:
         self._cambio_manual(destinos)
 
     async def _poner_general(self, asignaciones: dict[str, Path]) -> None:
-        """Cambia el fondo general sin tocar los propios de los workspaces.
-        Solo se pone a la vista donde el workspace visible no tiene el suyo;
-        en el resto queda guardado. Llamar con _lock cogido."""
-        visibles = {n: f for n, f in asignaciones.items() if not self._propio(self.pantallas[n])}
-        for nombre, path in asignaciones.items():
-            if nombre not in visibles:
-                self.guardado.monitores[nombre] = path
-                log.info("%s: fondo general -> %s (se vera fuera del workspace %s)",
-                         nombre, path, self.pantallas[nombre].workspace)
-        if visibles:
-            await self._aplicar(visibles, generales=set(visibles))
-        else:
-            self.guardado.escribir()
+        """Cambia el fondo general y el workspace visible deja su fondo propio
+        (los demas workspaces conservan el suyo). Llamar con _lock cogido."""
+        for nombre in asignaciones:
+            ws = self.pantallas[nombre].workspace
+            if ws and self.guardado.workspaces.pop(ws, None):
+                log.info("workspace %s: deja su fondo propio y usa el general", ws)
+        await self._aplicar(asignaciones, generales=set(asignaciones))
 
     async def next(self, monitor: str | None) -> None:
         """Cada monitor avanza por su propia carpeta."""
