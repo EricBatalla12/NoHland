@@ -28,12 +28,13 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 - **Un fondo por workspace**: cada workspace de Hyprland puede tener su fondo
   propio («Ponerlo solo en el workspace N» en el menú de una tarjeta, o
   `nohland set -w <archivo>`); al cambiar de workspace se pone el suyo y, en
-  los que no tienen, el general del monitor. Elegir fondo, `next` o la rotación
-  cambian el propio si el workspace visible lo tiene y el general si no.
-  «Usar el fondo general» (en la portada) o `nohland workspace clear` lo quitan.
-  «Ponerlo de fondo general» (menú de la tarjeta) o `nohland set -g <archivo>`
-  lo ponen como general y todos los workspaces dejan su fondo propio: queda ese
-  en todos.
+  los que no tienen, el general del monitor. Elegir un fondo en la ventana
+  (pulsar la tarjeta o «Ponerlo de fondo») lo pone en todos los workspaces:
+  quita sus fondos propios. Desde la terminal, `nohland set -g <archivo>` hace
+  lo mismo; `nohland set`, `next` y la rotación cambian el propio si el
+  workspace visible lo tiene y el general si no.
+  «Usar el fondo general» (en la portada) o `nohland workspace clear` quitan el
+  propio del workspace visible.
   Cada cambio de workspace con fondo distinto recolorea el escritorio (la
   paleta sigue al fondo) y, si es un vídeo, lo empieza desde el principio.
 - **Rotación automática** (interruptor en la ventana o `nohland rotate on`):

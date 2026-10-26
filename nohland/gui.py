@@ -1128,10 +1128,6 @@ class Ventana(Adw.ApplicationWindow):
             item = Gio.MenuItem.new(f"Ponerlo solo en el workspace {ref['workspace']}", None)
             item.set_action_and_target_value("app.poner-workspace", GLib.Variant("s", ruta))
             poner.append_item(item)
-        # El mismo en todos los workspaces: se quitan los fondos propios
-        item = Gio.MenuItem.new("Ponerlo de fondo general", None)
-        item.set_action_and_target_value("app.poner-general", GLib.Variant("s", ruta))
-        poner.append_item(item)
         menu.append_section(None, poner)
         otros = Gio.Menu()
         dentro = getattr(tarjeta, "en_rotacion", True)
@@ -1209,7 +1205,6 @@ class Aplicacion(Adw.Application):
             "rotacion-elegir": ("b", lambda _a, p: self.ventana.elegir_rotacion(p.get_boolean())),
             "poner-en": ("(ss)", self._poner_en),
             "poner-workspace": ("s", self._poner_workspace),
-            "poner-general": ("s", self._poner_general),
             "workspace-general": (None, lambda *_: self.orden(
                 self._con_monitor({"cmd": "workspace-clear"}), "El workspace vuelve al fondo general")),
             "mostrar": ("s", self._mostrar),
@@ -1297,7 +1292,11 @@ class Aplicacion(Adw.Application):
     def _poner(self, _accion, parametro):
         path = Path(parametro.get_string())
         self.ventana.avisar(f"Poniendo {path.name}…")
-        self.orden(self._con_monitor({"cmd": "set", "path": str(path)}), f"{path.name} en {self._donde()}")
+        # general: desde la ventana, poner un fondo lo pone en todos los
+        # workspaces (quita sus fondos propios); para uno solo esta «Ponerlo
+        # solo en el workspace N»
+        self.orden(self._con_monitor({"cmd": "set", "path": str(path), "general": True}),
+                   f"{path.name} en {self._donde()}")
 
     def _elegir_monitor(self, _accion, parametro):
         self.ventana.elegir_monitor(parametro.get_string() or None)
@@ -1322,7 +1321,7 @@ class Aplicacion(Adw.Application):
 
     def _poner_en(self, _accion, parametro):
         monitor, ruta = parametro.unpack()
-        peticion = {"cmd": "set", "path": ruta}
+        peticion = {"cmd": "set", "path": ruta, "general": True}  # como en _poner
         if monitor:
             peticion["monitor"] = monitor
         self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
@@ -1333,12 +1332,6 @@ class Aplicacion(Adw.Application):
         self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
         self.orden(self._con_monitor({"cmd": "set", "path": ruta, "workspace": True}),
                    f"{Path(ruta).name}: fondo propio de este workspace")
-
-    def _poner_general(self, _accion, parametro):
-        ruta = parametro.get_string()
-        self.ventana.avisar(f"Poniendo {Path(ruta).name}…")
-        self.orden(self._con_monitor({"cmd": "set", "path": ruta, "general": True}),
-                   f"{Path(ruta).name}: fondo de todos los workspaces")
 
     def _mostrar(self, _accion, parametro):
         Gtk.FileLauncher(file=Gio.File.new_for_path(parametro.get_string())).open_containing_folder(
