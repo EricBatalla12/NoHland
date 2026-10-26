@@ -30,9 +30,10 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import __version__, actualizar, config, miniaturas  # noqa: E402
+from . import __version__, actualizar, config, miniaturas, paquete  # noqa: E402
 from .cliente import DaemonParado, enviar  # noqa: E402
 from .config import ANIMATED_EXT, IMAGE_EXT  # noqa: E402
+from .daemon import Guardado  # noqa: E402
 
 APP_ID = "io.github.EricBatalla12.NoHland"
 # El icono se llama como el id oficial aunque la app corra con otro (pruebas)
@@ -701,6 +702,8 @@ class Ventana(Adw.ApplicationWindow):
 
         menu = Gio.Menu()
         menu.append("Ajustes", "app.ajustes")
+        menu.append("Exportar fondos…", "app.exportar")
+        menu.append("Importar fondos…", "app.importar")
         menu.append("Buscar actualizaciones", "app.buscar-actualizacion")
         menu.append("Acerca de NoHland", "app.acerca")
         cabecera.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menú"))
@@ -1228,6 +1231,8 @@ class Aplicacion(Adw.Application):
             "conseguir": (None, lambda *_: self.ventana.boton_webs.popup()),
             "web": ("s", self._web),
             "ajustes": (None, self._ajustes),
+            "exportar": (None, self._exportar),
+            "importar": (None, self._importar),
             "acerca": (None, self._acerca),
             "buscar-actualizacion": (None, lambda *_: self.ventana.buscar_actualizacion(forzar=True)),
             "ver-actualizacion": (None, self._ver_actualizacion),
@@ -1257,7 +1262,8 @@ class Aplicacion(Adw.Application):
 
     # --- ordenes al daemon
 
-    def orden(self, peticion: dict, hecho: str) -> None:
+    def orden(self, peticion: dict, hecho, timeout: float = 30) -> None:
+        """hecho: el aviso si sale bien, o una funcion que lo saca de la respuesta."""
         def al_terminar(respuesta, error):
             v = self.ventana
             if isinstance(error, DaemonParado):
@@ -1269,9 +1275,10 @@ class Aplicacion(Adw.Application):
                 v.avisar(respuesta.get("error", "error desconocido"))
             else:
                 v.aplicar_respuesta(respuesta)
-                if hecho:
-                    v.avisar(hecho)
-        en_hilo(lambda: enviar(peticion), al_terminar)
+                texto = hecho(respuesta) if callable(hecho) else hecho
+                if texto:
+                    v.avisar(texto)
+        en_hilo(lambda: enviar(peticion, timeout), al_terminar)
 
     def _con_monitor(self, peticion: dict) -> dict:
         monitor = self.ventana.monitor_elegido()
@@ -1392,6 +1399,67 @@ class Aplicacion(Adw.Application):
             except GLib.Error:
                 return  # cancelado
             al_elegir(fichero.get_path())
+        dialogo.open(self.ventana, None, elegido)
+
+    # --- pasar los fondos a otro equipo (paquete.py)
+
+    def _exportar(self, *_):
+        cfg = config.load()[0]
+        c = paquete.contenido(cfg)
+        cuerpo = (f"Se guardan {len(c.fondos)} fondos ({paquete.tamano(c.bytes)}) en un .zip, con el fondo "
+                  "general, el de cada workspace y los que no entran en la rotación. En el otro equipo, "
+                  "ábrelo con «Importar fondos…».\n\nLos fondos de Steam (Wallpaper Engine) no se pasan")
+        if c.steam:
+            cuerpo += f": {len(c.steam)} se queda{'n' if len(c.steam) > 1 else ''} fuera."
+        else:
+            cuerpo += "."
+        dialogo = Adw.AlertDialog(heading="Exportar fondos", body=cuerpo)
+        dialogo.add_response("cancelar", "Cancelar")
+        dialogo.add_response("guardar", "Elegir dónde guardar…")
+        dialogo.set_response_appearance("guardar", Adw.ResponseAppearance.SUGGESTED)
+        dialogo.set_default_response("guardar")
+        dialogo.set_close_response("cancelar")
+
+        def respuesta(_d, r):
+            if r != "guardar" or not c.fondos:
+                if r == "guardar":
+                    self.ventana.avisar("No hay fondos que exportar")
+                return
+            guardar = Gtk.FileDialog(title="Exportar fondos", initial_name="nohland-fondos.zip")
+
+            def elegido(d, resultado):
+                try:
+                    destino = Path(d.save_finish(resultado).get_path())
+                except GLib.Error:
+                    return  # cancelado
+                if destino.suffix.lower() != ".zip":
+                    destino = destino.with_name(destino.name + ".zip")
+                self.ventana.avisar(f"Exportando {len(c.fondos)} fondos…")
+                # state.json se lee en el hilo, al guardar: lo de ahora, no lo de al abrir el dialogo
+                en_hilo(lambda: paquete.exportar(cfg, Guardado.leer(), destino),
+                        lambda hecho, error: self.ventana.avisar(
+                            f"No pude exportar: {error}" if error else
+                            f"Exportados {len(hecho.fondos)} fondos en {destino.name}"))
+            guardar.save(self.ventana, None, elegido)
+        dialogo.connect("response", respuesta)
+        dialogo.present(self.ventana)
+
+    def _importar(self, *_):
+        filtro = Gtk.FileFilter(name="Paquete de NoHland (.zip)")
+        filtro.add_suffix("zip")
+        filtros = Gio.ListStore.new(Gtk.FileFilter)
+        filtros.append(filtro)
+        dialogo = Gtk.FileDialog(title="Importar fondos", filters=filtros, default_filter=filtro)
+
+        def elegido(d, resultado):
+            try:
+                ruta = d.open_finish(resultado).get_path()
+            except GLib.Error:
+                return  # cancelado
+            self.ventana.avisar(f"Importando {Path(ruta).name}…")
+            self.orden({"cmd": "import", "path": ruta},
+                       lambda r: f"Importados {r['imported']} fondos en {Path(r['folder']).name}",
+                       timeout=1800)
         dialogo.open(self.ventana, None, elegido)
 
     def _papelera(self, _accion, parametro):

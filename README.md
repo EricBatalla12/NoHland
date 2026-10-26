@@ -48,6 +48,15 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
   Elegir un fondo a mano reinicia la cuenta. Es un único temporizador, así que
   no cuesta nada entre cambios. Los fotogramas de todos los vídeos de la
   carpeta se quedan en caché: sacar el de un 4K a 60 fps cuesta ~4 s de CPU.
+- **Pasar los fondos a otro equipo**: «Exportar fondos…» (menú de la ventana)
+  o `nohland export <archivo.zip>` guardan en un .zip los fondos de las
+  carpetas y lo elegido (fondo general, el de cada workspace y los que no
+  entran en la rotación). En el otro equipo, «Importar fondos…» o
+  `nohland import <archivo.zip>` copian los fondos a su carpeta y aplican esas
+  elecciones; el fondo general va a todos sus monitores. Un fondo que ya está
+  (mismo nombre y tamaño) no se duplica. **Los de Steam (Wallpaper Engine) no
+  se pasan**: son enlaces al Workshop de cada cuenta; el otro equipo los tiene
+  si está suscrito. El .zip va al otro equipo como quieras (USB, Syncthing…).
 
 ## Interfaz
 
@@ -105,6 +114,8 @@ nohland resume          # quita la pausa manual (la automática sigue mandando)
 nohland status          # qué suena, si está pausado y por qué (--json)
 nohland set -w <archivo>        # solo en el workspace visible (fondo propio)
 nohland set -g <archivo>        # fondo general; el workspace visible deja el suyo
+nohland export fondos.zip       # los fondos y lo elegido, para otro equipo (sin los de Steam)
+nohland import fondos.zip       # los trae a este equipo
 nohland workspace clear # ese workspace vuelve al fondo general
 nohland rotate on|off   # rotación automática
 nohland rotate every 30 # cada 30 minutos
@@ -248,6 +259,7 @@ Hyprland. `install.sh` lo enlaza en `~/.local/share/icons/hicolor`.
 | `nohland/backends.py` | Noctalia para imágenes, mpvpaper + IPC de mpv para vídeo, fotograma con ffmpeg |
 | `nohland/energia.py` | batería: lectura de `/sys/class/power_supply` y uevents del kernel |
 | `nohland/config.py` | rutas y lectura de `config.toml` |
+| `nohland/paquete.py` | exportar e importar los fondos en un .zip para otro equipo |
 
 Rutas en ejecución: socket de control en `$XDG_RUNTIME_DIR/nohland/control.sock`,
 último fondo de cada monitor en `~/.local/state/nohland/state.json`.

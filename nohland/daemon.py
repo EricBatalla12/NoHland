@@ -43,10 +43,11 @@ import logging
 import os
 import random
 import signal
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import backends, config, energia, greeter
+from . import backends, config, energia, greeter, paquete
 from .backends import BackendError, MpvPaper
 from .config import ANIMATED_EXT, CONTROL_SOCKET, IMAGE_EXT, RUNTIME_DIR, STATE_PATH, Config
 from .hyprland import Hyprland, HyprlandError
@@ -779,6 +780,38 @@ class Daemon:
         log.info("workspace %s: vuelve al fondo general", ", ".join(quitados))
         await self._sincronizar_workspaces()
 
+    async def importar(self, origen: Path) -> dict:
+        """Copia los fondos de un paquete de otro equipo (ver paquete.py) a la
+        carpeta principal y aplica sus elecciones: fondo general en todos los
+        monitores, fondo propio de cada workspace y excluidos de la rotacion."""
+        if not origen.is_file():
+            raise ValueError(f"no existe: {origen}")
+        carpeta = self.cfg.directory
+        try:
+            # Puede ser algun GB: en un hilo, para no parar el bucle del daemon
+            manifiesto, rutas = await asyncio.to_thread(paquete.importar, origen, carpeta)
+        except zipfile.BadZipFile:
+            raise ValueError(f"{origen.name} no es un .zip valido") from None
+
+        def ruta(nombre) -> Path | None:
+            return rutas.get(nombre) if nombre else None
+
+        async with self._lock:
+            for ws, nombre in manifiesto.get("workspaces", {}).items():
+                if r := ruta(nombre):
+                    self.guardado.workspaces[ws] = str(r)
+            self.guardado.rotacion_excluidos |= {
+                str(r) for n in manifiesto.get("rotation_excluded", []) if (r := ruta(n))}
+            if general := ruta(manifiesto.get("general")):
+                # Los monitores de otro equipo no son los de este: va a todos
+                for nombre in self.pantallas:
+                    self.guardado.monitores[nombre] = general
+                self.guardado.ultimo = general
+            self.guardado.escribir()
+            await self._restaurar(list(self.pantallas))
+        log.info("importados %d fondos de %s en %s", len(rutas), origen, carpeta)
+        return {"imported": len(rutas), "folder": str(carpeta)}
+
     async def _consultar_hyprland(self) -> None:
         completas: dict[str, str] = {}
         monitores = await self.hypr.query("monitors")
@@ -866,6 +899,7 @@ class Daemon:
     async def _orden(self, p: dict) -> dict:
         orden = p.get("cmd")
         monitor = p.get("monitor")
+        extra = {}
         if orden == "set":
             await self.set(Path(p["path"]), monitor, solo_workspace=bool(p.get("workspace")),
                            general=bool(p.get("general")))
@@ -891,9 +925,11 @@ class Daemon:
             await self.poner_greeter(p.get("mode"), p.get("image"))
         elif orden == "palette":
             await self.refrescar_paleta()
+        elif orden == "import":
+            extra = await self.importar(Path(p["path"]))
         elif orden != "status":
             raise ValueError(f"orden desconocida: {orden!r}")
-        return {"ok": True, "status": await self.status()}
+        return {"ok": True, **extra, "status": await self.status()}
 
     async def status(self) -> dict:
         paleta = self.monitor_paleta()

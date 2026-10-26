@@ -70,6 +70,19 @@ def imprimir_estado(e: dict) -> None:
             print(linea)
 
 
+def _exportar(destino: Path) -> int:
+    # No pasa por el daemon: solo lee la config y state.json
+    from . import config, paquete
+    from .daemon import Guardado
+    if destino.suffix.lower() != ".zip":
+        destino = destino.with_name(destino.name + ".zip")
+    c = paquete.exportar(config.load()[0], Guardado.leer(), destino)
+    print(f"Exportados {len(c.fondos)} fondos ({paquete.tamano(c.bytes)}) en {destino}")
+    if c.steam:
+        print(f"Los fondos de Steam (Wallpaper Engine) no se pasan: se han quedado fuera {len(c.steam)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="nohland", description="Gestor de fondos para Hyprland + Noctalia")
     ap.add_argument("--version", action="version", version=f"nohland {__version__}")
@@ -103,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
                                        "video concreto; no: no tocarlo")
     p_gre.add_argument("modo", choices=["escritorio", "fija", "no"])
     p_gre.add_argument("archivo", nargs="?", type=Path)
+    p_exp = sub.add_parser("export", help="guarda los fondos en un .zip para otro equipo",
+                           description="los fondos de las carpetas y lo elegido (fondo general, el de cada "
+                                       "workspace, excluidos de la rotacion); los de Steam no se pasan")
+    p_exp.add_argument("archivo", type=Path)
+    p_imp = sub.add_parser("import", help="trae los fondos de un .zip hecho con `nohland export`")
+    p_imp.add_argument("archivo", type=Path)
     p_status = sub.add_parser("status", help="que se reproduce y si esta pausado")
     p_status.add_argument("--json", action="store_true", help="salida en JSON")
     args = ap.parse_args(argv)
@@ -117,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
         # Import tardio: el CLI y el daemon no necesitan GTK
         from .gui import main as gui_main
         return gui_main()
+
+    if args.orden == "export":
+        return _exportar(args.archivo)
 
     peticion = {"cmd": "workspace-clear" if args.orden == "workspace" else args.orden}
     if getattr(args, "workspace", False):
@@ -147,17 +169,20 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("greeter fija necesita un archivo")
     if getattr(args, "monitor", None):
         peticion["monitor"] = args.monitor
-    if args.orden == "set":
+    if args.orden in ("set", "import"):
         # La ruta se resuelve aqui: el daemon no comparte el directorio actual
         peticion["path"] = os.path.abspath(args.archivo.expanduser())
 
     try:
-        respuesta = enviar(peticion)
+        # Importar copia ficheros que pueden sumar algun GB
+        respuesta = enviar(peticion, timeout=1800 if args.orden == "import" else 30)
     except DaemonParado as e:
         sys.exit(f"nohland: {e}")
     if not respuesta.get("ok"):
         print(f"nohland: {respuesta.get('error')}", file=sys.stderr)
         return 1
+    if args.orden == "import":
+        print(f"Importados {respuesta['imported']} fondos en {respuesta['folder']}")
     if args.orden == "status" and args.json:
         print(json.dumps(respuesta["status"], indent=2, ensure_ascii=False))
     else:

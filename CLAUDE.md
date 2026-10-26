@@ -15,13 +15,14 @@ Lo de un equipo concreto (rutas, monitores, preferencias de trabajo) va en
 | CLI | `nohland/cli.py` + `cliente.py` | Subcomandos; todo salvo `daemon`, `gui` y `doctor` habla con el daemon por `$XDG_RUNTIME_DIR/nohland/control.sock` (JSON por línea) |
 | Ventana | `nohland/gui.py`, `ajustes.py` | Otro cliente del socket. Cada botón es una acción de la app (`app.siguiente`, `app.poner`…), así que se puede manejar por D-Bus |
 | Reproducción | `nohland/backends.py` | Imágenes → `noctalia msg wallpaper-set [monitor] ruta`. Vídeo/GIF → un `mpvpaper` por monitor en la capa `bottom`, controlado por el IPC de mpv. Fotograma de vídeos con ffmpeg para la paleta |
-| Otros | `hyprland.py`, `energia.py`, `greeter.py`, `miniaturas.py`, `actualizar.py`, `doctor.py`, `config.py` | Sockets de Hyprland; batería por netlink; fondo del greeter; miniaturas; buscar/instalar versiones; revisión del equipo; config |
+| Otros | `hyprland.py`, `energia.py`, `greeter.py`, `miniaturas.py`, `actualizar.py`, `doctor.py`, `config.py`, `paquete.py` | Sockets de Hyprland; batería por netlink; fondo del greeter; miniaturas; buscar/instalar versiones; revisión del equipo; config; exportar/importar fondos en un .zip |
 
 Funciones, por si hay que localizarlas: fondos fijos/vídeo/GIF por monitor,
 paleta desde fotograma, pausa (pantalla completa visible, ventana de juego
 activa, batería, manual guardada), rotación (tiempo, orden, excluidos), fondo
 por workspace, colores de Noctalia y fondo del greeter desde la ventana,
-aviso de versión nueva con «Actualizar» (`actualizar.py`), `nohland doctor`,
+aviso de versión nueva con «Actualizar» (`actualizar.py`), exportar/importar
+fondos a otro equipo (`paquete.py`, sin los de Steam), `nohland doctor`,
 `tools/preparar-greeter.sh` (sudo, una vez), icono en `data/`.
 
 Rutas en ejecución: config `~/.config/nohland/config.toml` (lo editable a mano y
@@ -50,6 +51,9 @@ Servicio: `systemd/nohland.service`, que `install.sh` **copia** (no enlaza).
   borra el enlace. Por eso se copia.
 - **Gtk.Picture** pide el tamaño natural de la imagen y estira lo que la
   contiene: para imágenes recortadas está `Cubierta` (widget propio).
+- **Pruebas con HOME falso:** la sesión de Eric define `XDG_CONFIG_HOME`,
+  `XDG_STATE_HOME`… y ganan a `HOME`: hay que quitarlas (`unset`) o se leen la
+  config y el estado reales.
 - **Python 3.14 / zsh:** en los scripts de prueba no usar `md` como nombre de
   función (es alias de mkdir en el shell que usa la herramienta) ni f-strings
   con comillas escapadas dentro de `python3 -c '…'`.
