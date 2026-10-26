@@ -92,18 +92,22 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="revisa que el equipo tenga lo que NoHland necesita")
     p_set = sub.add_parser("set", help="pone un fondo (imagen, mp4, webm o gif)")
     p_set.add_argument("archivo", type=Path)
+    # Como en la ventana: sin -w el fondo va a todos los workspaces (quita sus
+    # fondos propios). -g era eso antes de que fuera lo normal; se acepta igual
     solo = p_set.add_mutually_exclusive_group()
     solo.add_argument("-w", "--workspace", action="store_true",
                       help="solo en el workspace visible (su fondo propio)")
-    solo.add_argument("-g", "--general", action="store_true",
-                      help="como fondo general; todos los workspaces dejan su fondo propio")
+    solo.add_argument("-g", "--general", action="store_true", help=argparse.SUPPRESS)
     p_next = sub.add_parser("next", help="pasa al siguiente fondo de la carpeta")
+    p_prev = sub.add_parser("prev", help="vuelve al fondo anterior")
     p_ws = sub.add_parser("workspace", help="fondo propio del workspace visible",
                           description="clear: el workspace visible vuelve a usar el fondo general del monitor")
     p_ws.add_argument("accion", choices=["clear"])
-    for p in (p_set, p_next, p_ws):
+    for p in (p_set, p_next, p_prev, p_ws):
         p.add_argument("-m", "--monitor", help="solo en este monitor (p. ej. HDMI-A-1); por defecto, en todos")
-    sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
+    p_pausa = sub.add_parser("pause", help="pausa la animacion hasta `nohland resume`")
+    p_pausa.add_argument("-t", "--toggle", action="store_true",
+                         help="la quita si ya estaba puesta (para un atajo de teclado)")
     sub.add_parser("resume", help="quita la pausa manual")
     p_rot = sub.add_parser(
         "rotate", help="rotacion automatica",
@@ -143,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     peticion = {"cmd": "workspace-clear" if args.orden == "workspace" else args.orden}
     if getattr(args, "workspace", False):
         peticion["workspace"] = True
-    if getattr(args, "general", False):
+    if args.orden == "set" and not args.workspace:
         peticion["general"] = True
     if args.orden == "rotate":
         accion, valor = args.accion, args.valor
@@ -174,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         peticion["path"] = os.path.abspath(args.archivo.expanduser())
 
     try:
+        if args.orden == "pause" and args.toggle and enviar({"cmd": "status"})["status"]["manual_pause"]:
+            peticion["cmd"] = "resume"
         # Importar copia ficheros que pueden sumar algun GB
         respuesta = enviar(peticion, timeout=1800 if args.orden == "import" else 30)
     except DaemonParado as e:

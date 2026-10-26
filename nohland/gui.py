@@ -15,6 +15,7 @@ Cada boton es una accion de la aplicacion (app.siguiente, app.poner...), asi
 que tambien se pueden lanzar por D-Bus. Asi se prueba la interfaz sin raton.
 """
 
+import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -67,9 +68,9 @@ CSS = """
 
 /* --- coleccion */
 .tarjeta { border-radius: 18px; background: alpha(@window_fg_color, 0.06);
-           transition: box-shadow 200ms ease, outline-color 200ms ease;
+           transition: box-shadow 200ms ease, outline-color 200ms ease, transform 200ms ease;
            outline: 3px solid transparent; outline-offset: 2px; }
-flowboxchild:hover .tarjeta { box-shadow: 0 10px 28px alpha(black, 0.45); }
+flowboxchild:hover .tarjeta { box-shadow: 0 10px 28px alpha(black, 0.45); transform: translateY(-3px); }
 flowboxchild:focus-visible .tarjeta { outline-color: alpha(@accent_bg_color, 0.6); }
 .tarjeta.actual { outline-color: @accent_bg_color; }
 .tarjeta-velo { background-image: linear-gradient(to top, alpha(black, 0.78), transparent); padding: 28px 14px 12px 14px; }
@@ -190,7 +191,9 @@ class Cubierta(Gtk.Widget):
 
     def do_measure(self, orientacion, para):
         if orientacion == Gtk.Orientation.HORIZONTAL:
-            return self.ancho_minimo, max(self.ancho_minimo, 320), -1, -1
+            # El natural decide cuantas tarjetas caben por fila: con 320 salian
+            # 2 en una ventana de 1024 px; con 260, 3
+            return self.ancho_minimo, max(self.ancho_minimo, 260), -1, -1
         if self.alto:
             return self.alto, self.alto, -1, -1
         alto = round((para if para > 0 else 320) * 9 / 16)
@@ -601,6 +604,11 @@ class Portada(Gtk.Overlay):
         abajo.append(textos)
 
         botones = Gtk.Box(spacing=14, valign=Gtk.Align.END)
+        self.anterior = Gtk.Button(action_name="app.anterior", valign=Gtk.Align.CENTER,
+                                   tooltip_text="Volver al fondo anterior (Ctrl+←)",
+                                   child=Gtk.Image(icon_name="media-skip-backward-symbolic", pixel_size=22))
+        self.anterior.add_css_class("boton-redondo")
+        self.anterior.set_sensitive(False)  # hasta saber si hay historial
         self.siguiente = Gtk.Button(action_name="app.siguiente", valign=Gtk.Align.CENTER,
                                     tooltip_text="Siguiente fondo de la carpeta (Ctrl+→)",
                                     child=Gtk.Image(icon_name="media-skip-forward-symbolic", pixel_size=22))
@@ -609,6 +617,7 @@ class Portada(Gtk.Overlay):
         self.pausa = Gtk.Button(action_name="app.pausa", child=self.icono_pausa, valign=Gtk.Align.CENTER)
         self.pausa.add_css_class("boton-redondo")
         self.pausa.add_css_class("principal")
+        botones.append(self.anterior)
         botones.append(self.siguiente)
         botones.append(self.pausa)
         abajo.append(botones)
@@ -656,6 +665,7 @@ class Portada(Gtk.Overlay):
         # puesta se deja activo para poder quitarla
         self.pausa.set_sensitive(not sin_daemon and (hay_video or manual))
         self.siguiente.set_sensitive(not sin_daemon)
+        self.anterior.set_sensitive(not sin_daemon and bool(monitor and monitor.get("has_previous")))
 
     def _vacia(self, titulo: str, texto: str) -> None:
         self.usar_general.set_visible(False)
@@ -736,7 +746,7 @@ class Ventana(Adw.ApplicationWindow):
         # --- cabecera de la coleccion
         titulo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER)
         titulo.append(_etiqueta("Colección", "title-2", xalign=0))
-        self.ruta_carpeta = _etiqueta("", "dim-label", "caption", xalign=0, ellipsize=Pango.EllipsizeMode.START)
+        self.ruta_carpeta = _etiqueta("", "dim-label", "caption", xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
         titulo.append(self.ruta_carpeta)
 
         self.filtro = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
@@ -745,7 +755,7 @@ class Ventana(Adw.ApplicationWindow):
         self.filtro.set_active_name("todo")
         self.filtro.connect("notify::active-name", lambda *_: self._filtrar())
 
-        self.busqueda = Gtk.SearchEntry(placeholder_text="Buscar fondos", valign=Gtk.Align.CENTER, width_chars=22)
+        self.busqueda = Gtk.SearchEntry(placeholder_text="Buscar fondos", valign=Gtk.Align.CENTER, hexpand=True)
         self.busqueda.connect("search-changed", lambda *_: self._filtrar())
 
         carpeta = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER,
@@ -772,9 +782,17 @@ class Ventana(Adw.ApplicationWindow):
         self.boton_rotacion.add_css_class("flat")
         rotacion.append(self.boton_rotacion)
 
-        barra = Gtk.Box(spacing=12)
-        for w in (titulo, rotacion, self.filtro, self.busqueda, carpeta):
-            barra.append(w)
+        # En dos filas: en una sola, con la ventana a 1024 px, GTK encogia los
+        # filtros hasta «Imá…» y «Ani…»
+        barra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        fila = Gtk.Box(spacing=12)
+        for w in (titulo, rotacion):
+            fila.append(w)
+        barra.append(fila)
+        fila = Gtk.Box(spacing=12)
+        for w in (self.filtro, self.busqueda, carpeta):
+            fila.append(w)
+        barra.append(fila)
 
         # --- cuadricula
         self.cuadricula = Gtk.FlowBox(
@@ -829,6 +847,12 @@ class Ventana(Adw.ApplicationWindow):
         vista.set_content(desplazable)
         self.toasts = Adw.ToastOverlay(child=vista)
         self.set_content(self.toasts)
+
+        # Soltar imagenes o videos sobre la ventana los copia a la carpeta; la
+        # coleccion los muestra sola (la carpeta esta vigilada)
+        soltar = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        soltar.connect("drop", self._soltados)
+        self.add_controller(soltar)
 
         atajo = Gtk.ShortcutController()
         atajo.add_shortcut(Gtk.Shortcut(trigger=Gtk.ShortcutTrigger.parse_string("<Control>f"),
@@ -1072,7 +1096,8 @@ class Ventana(Adw.ApplicationWindow):
         visibles = sum(1 for t in self.tarjetas.values() if self._pasa_filtro(t))
         total = len(self.tarjetas)
         animados = sum(1 for t in self.tarjetas.values() if t.tipo != "imagen")
-        self.ruta_carpeta.set_label(f"{total} fondos · {animados} animados · {self.carpeta}")
+        self.ruta_carpeta.set_label(f"{total} fondos · {animados} animados · {config._con_tilde(self.carpeta)}")
+        self.ruta_carpeta.set_tooltip_text(str(self.carpeta))
         self.pila.set_visible_child_name("vacio" if not total else "fondos" if visibles else "nada")
 
     def _pedir_miniatura(self, path: Path, al_terminar, tamano=miniaturas.TARJETA) -> None:
@@ -1148,6 +1173,29 @@ class Ventana(Adw.ApplicationWindow):
         menu.append_section(None, papelera)
         return menu
 
+    def _soltados(self, _destino, lista, _x, _y) -> bool:
+        rutas = [Path(f.get_path()) for f in lista.get_files() if f.get_path()]
+        fondos = [r for r in rutas if r.is_file() and tipo_de(r)]
+        if not fondos or not self.carpeta:
+            self.avisar("Solo se pueden soltar imágenes, mp4, webm o gif")
+            return False
+        carpeta = self.carpeta
+
+        def copiar() -> int:
+            nuevos = 0
+            for r in fondos:
+                destino = carpeta / r.name
+                if r.parent == carpeta or destino.exists():
+                    continue  # ya esta en la coleccion
+                shutil.copy2(r, destino)
+                nuevos += 1
+            return nuevos
+        en_hilo(copiar, lambda n, error: self.avisar(
+            f"No pude copiarlos: {error}" if error else
+            f"{n} fondo{'s' if n != 1 else ''} añadido{'s' if n != 1 else ''} a la colección" if n else
+            "Ya estaban en la colección"))
+        return True
+
     def _abrir_carpeta(self) -> None:
         if self.carpeta:
             Gtk.FileLauncher(file=Gio.File.new_for_path(str(self.carpeta))).launch(self, None, None)
@@ -1189,6 +1237,7 @@ class Aplicacion(Adw.Application):
         self.ventana: Ventana | None = None
         acciones = {
             "siguiente": (None, self._siguiente),
+            "anterior": (None, lambda *_: self.orden(self._con_monitor({"cmd": "prev"}), "")),
             "pausa": (None, self._pausa),
             "poner": ("s", self._poner),
             "monitor": ("s", self._elegir_monitor),
@@ -1238,6 +1287,7 @@ class Aplicacion(Adw.Application):
             self.add_action(accion)
         self.set_accels_for_action("app.salir", ["<Control>q", "<Control>w"])
         self.set_accels_for_action("app.siguiente", ["<Control>Right"])
+        self.set_accels_for_action("app.anterior", ["<Control>Left"])
         self.set_accels_for_action("app.pausa", ["<Control>space"])
 
     def do_startup(self) -> None:

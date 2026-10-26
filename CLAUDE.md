@@ -20,7 +20,8 @@ Lo de un equipo concreto (rutas, monitores, preferencias de trabajo) va en
 Funciones, por si hay que localizarlas: fondos fijos/vídeo/GIF por monitor,
 paleta desde fotograma, pausa (pantalla completa visible, ventana de juego
 activa, batería, manual guardada), rotación (tiempo, orden, excluidos), fondo
-por workspace, colores de Noctalia y fondo del greeter desde la ventana,
+por workspace (el vídeo sigue por donde iba al volver), historial con `prev`,
+arrastrar y soltar en la ventana, colores de Noctalia y fondo del greeter desde la ventana,
 aviso de versión nueva con «Actualizar» (`actualizar.py`), exportar/importar
 fondos a otro equipo (`paquete.py`, sin los de Steam), `nohland doctor`,
 `tools/preparar-greeter.sh` (sudo, una vez), icono en `data/`.
@@ -94,6 +95,13 @@ Se prueba en el equipo real, mientras la persona lo está usando:
   secuestrar la ventana abierta del usuario (la app es de instancia única), y
   manejarla con sus acciones. Capturas con `grim` solo en un workspace que esté
   vacío justo antes y con el workspace especial cerrado.
+- Para VER la ventana sin abrir nada en el escritorio: `gtk4-broadwayd :5
+  --port 8085` y la copia con `GDK_BACKEND=broadway BROADWAY_DISPLAY=:5`; se
+  mira en el navegador integrado (http://127.0.0.1:8085). Los popovers y menús
+  no se dibujan ahí. Sigue hablando con el daemon real: no pulsar nada que
+  cambie el fondo.
+- Para cerrar esa copia, `pgrep -f` y `kill` por PID: un `pkill -f` con el
+  patrón en la propia orden mata también la shell que lo lanza.
 - **Nunca** `hyprctl dispatch 'hl.dsp.window.close()'`: actúa sobre la ventana
   activa, que puede ser cualquiera. Cerrar por la acción `app.salir` o por PID.
 - Instalación y actualizaciones: con un `HOME` falso y una copia del repo en el

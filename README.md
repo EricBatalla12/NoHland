@@ -28,15 +28,15 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 - **Un fondo por workspace**: cada workspace de Hyprland puede tener su fondo
   propio («Ponerlo solo en el workspace N» en el menú de una tarjeta, o
   `nohland set -w <archivo>`); al cambiar de workspace se pone el suyo y, en
-  los que no tienen, el general del monitor. Elegir un fondo en la ventana
-  (pulsar la tarjeta o «Ponerlo de fondo») lo pone en todos los workspaces:
-  quita sus fondos propios. Desde la terminal, `nohland set -g <archivo>` hace
-  lo mismo; `nohland set`, `next` y la rotación cambian el propio si el
-  workspace visible lo tiene y el general si no.
+  los que no tienen, el general del monitor. Elegir un fondo (pulsar la tarjeta,
+  «Ponerlo de fondo» o `nohland set`) lo pone en todos los workspaces: quita
+  sus fondos propios. «Siguiente», «Anterior» y la rotación cambian el propio
+  si el workspace visible lo tiene y el general si no. Al volver a un
+  workspace con vídeo, el vídeo sigue por donde iba.
   «Usar el fondo general» (en la portada) o `nohland workspace clear` quitan el
   propio del workspace visible.
   Cada cambio de workspace con fondo distinto recolorea el escritorio (la
-  paleta sigue al fondo) y, si es un vídeo, lo empieza desde el principio.
+  paleta sigue al fondo).
 - **Rotación automática** (interruptor en la ventana o `nohland rotate on`):
   cada N minutos cada monitor pasa a otro fondo de su carpeta, en orden o al
   azar, solo entre los que estén en la rotación. El tiempo, el orden y qué
@@ -64,10 +64,13 @@ Gestor de fondos de pantalla para Hyprland + Noctalia, hecho a medida.
 libadwaita que hace todo lo del CLI:
 
 - **Portada**: el fondo que suena, en grande, con su tipo, decodificador,
-  estado y motivos de pausa, y los botones Pausar/Reanudar y Siguiente.
+  estado y motivos de pausa, y los botones Anterior, Siguiente y
+  Pausar/Reanudar. «Anterior» vuelve a los fondos de antes (recuerda los 20
+  últimos de cada monitor, elegidos a mano o por la rotación).
 - **Colección**: tarjetas con miniatura de la carpeta (clic = ponerlo), filtro
   Todo / Imágenes / Animados, búsqueda (Ctrl+F) y botón para abrir la carpeta.
-  El fondo en uso lleva la etiqueta «EN USO».
+  El fondo en uso lleva la etiqueta «EN USO». Arrastrar imágenes o vídeos
+  sobre la ventana los copia a la carpeta.
 - **Varios monitores**: selector en la barra y una fila por monitor. Con un
   solo monitor no aparece.
 - **Rotación**: interruptor junto a la colección y un panel con el tiempo
@@ -98,7 +101,11 @@ libadwaita que hace todo lo del CLI:
 - Pide el estado cada 2 s solo mientras está abierta.
 - Al guardar los ajustes se pierden los comentarios del `config.toml`, y el
   reinicio del servicio quita la pausa manual y empieza los vídeos de nuevo.
-- Atajos: Ctrl+Espacio pausa/reanuda, Ctrl+→ siguiente, Ctrl+F busca, Ctrl+Q cierra.
+- Atajos: Ctrl+Espacio pausa/reanuda, Ctrl+→ siguiente, Ctrl+← anterior,
+  Ctrl+F busca, Ctrl+Q cierra.
+- Atajos globales (sin abrir la ventana): enlaza en Hyprland `nohland next`,
+  `nohland prev` y `nohland pause --toggle`. Por ejemplo, en Lua:
+  `hl.bind("SUPER + ALT + Right", hl.dsp.exec_cmd("nohland next"))`.
 - Cada botón es una acción de la aplicación, así que se puede manejar por
   D-Bus (así se prueba sin ratón):
   `gdbus call --session --dest io.github.EricBatalla12.NoHland --object-path /io/github/EricBatalla12/NoHland --method org.gtk.Actions.Activate siguiente "[]" "{}"`
@@ -106,14 +113,15 @@ libadwaita que hace todo lo del CLI:
 ## Uso desde la terminal
 
 ```
-nohland set <archivo>   # pone un fondo en todos los monitores
+nohland set <archivo>   # pone un fondo en todos los monitores y workspaces
 nohland set -m DP-1 <archivo>   # ...o solo en uno
 nohland next [-m DP-1]  # siguiente de la carpeta de cada monitor (orden alfabético)
+nohland prev [-m DP-1]  # vuelve al fondo anterior (recuerda los 20 últimos)
 nohland pause           # pausa manual
+nohland pause --toggle  # la pone o la quita (para un atajo de teclado)
 nohland resume          # quita la pausa manual (la automática sigue mandando)
 nohland status          # qué suena, si está pausado y por qué (--json)
 nohland set -w <archivo>        # solo en el workspace visible (fondo propio)
-nohland set -g <archivo>        # el mismo en todos los workspaces (quita los propios)
 nohland export fondos.zip       # los fondos y lo elegido, para otro equipo (sin los de Steam)
 nohland import fondos.zip       # los trae a este equipo
 nohland workspace clear # ese workspace vuelve al fondo general
@@ -241,9 +249,10 @@ NoHland: lo de greeter.toml gana a la sincronización.
 
 ## Icono
 
-`data/io.github.EricBatalla12.NoHland.svg`: un paisaje nocturno (la noche de
-Noctalia) dentro de un marco con el degradado cian-verde de los bordes de
-Hyprland. `install.sh` lo enlaza en `~/.local/share/icons/hicolor`.
+`data/io.github.EricBatalla12.NoHland.svg`: un fondo de pantalla (un paisaje
+nocturno) sentado en la luna creciente de Noctalia, con los colores y el trazo
+de su logo: el amarillo de la luna, el lavanda del búho y el contorno azul
+marino. `install.sh` lo enlaza en `~/.local/share/icons/hicolor`.
 
 ## Estructura
 

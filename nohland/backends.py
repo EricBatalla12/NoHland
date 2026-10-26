@@ -139,10 +139,12 @@ _contador = itertools.count(1)
 class MpvPaper:
     """Un proceso mpvpaper reproduciendo un fichero en un monitor."""
 
-    def __init__(self, cfg: Config, path: Path, monitor: str) -> None:
+    def __init__(self, cfg: Config, path: Path, monitor: str, inicio: float = 0) -> None:
         self.cfg = cfg
         self.path = path
         self.monitor = monitor
+        # Segundo por el que empezar (el video de un workspace sigue por donde iba)
+        self.inicio = inicio
         # Socket distinto por instancia: al cambiar de video se arranca el
         # nuevo antes de cerrar el viejo y no pueden pisarse.
         self.ipc_path = RUNTIME_DIR / f"mpv-{monitor}-{next(_contador)}.sock"
@@ -164,6 +166,8 @@ class MpvPaper:
         ]
         if paused:
             opciones.append("pause")
+        if self.inicio > 0:
+            opciones.append(f"start={self.inicio:.2f}")
         # mpvpaper separa las opciones por espacios
         return " ".join(opciones + self.cfg.mpv_options)
 
@@ -224,6 +228,14 @@ class MpvPaper:
         if respuesta.get("error") != "success":
             raise BackendError(f"mpv {args}: {respuesta.get('error')}")
         return respuesta.get("data")
+
+    async def posicion(self) -> float | None:
+        """Segundo por el que va, o None si mpv no contesta."""
+        try:
+            pos = await self.command("get_property", "time-pos")
+        except (OSError, BackendError, asyncio.TimeoutError):
+            return None
+        return pos if isinstance(pos, (int, float)) else None
 
     async def set_pause(self, paused: bool) -> None:
         await self.command("set_property", "pause", paused)

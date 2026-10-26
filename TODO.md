@@ -5,27 +5,17 @@ Cada una lleva lo que aporta y lo que costaría (poco / medio / mucho).
 
 ## Recomendadas para la próxima tanda
 
-1. **Que el vídeo de cada workspace no empiece de cero.** Con fondo por
-   workspace, al volver a un workspace con vídeo se arranca otro mpvpaper
-   desde el principio. Se podría recordar la posición (`start=`) o dejar vivo
-   y oculto el de cada workspace. Coste: medio.
-2. **Fondos de día y de noche.** Dos listas, o etiquetas en cada fondo, y
+1. **Fondos de día y de noche.** Dos listas, o etiquetas en cada fondo, y
    cambio a la hora que digas (o al cambiar Noctalia entre claro y oscuro con
    el hook `theme_mode_changed`). Coste: medio.
-3. **Atajos globales.** Siguiente, anterior y pausa con teclas en
-   `binds.lua` (`nohland next`, etc.). Coste: poco.
-4. **Volver al anterior** (`nohland prev` y botón en la portada), con un
-   pequeño historial. Coste: poco.
-5. **Importar desde Wallpaper Engine.** Ver tus suscripciones de tipo Vídeo
+2. **Importar desde Wallpaper Engine.** Ver tus suscripciones de tipo Vídeo
    con su miniatura y enlazarlas a la carpeta con un clic, sin terminal.
    Coste: medio.
-6. **Optimizar vídeos pesados.** Convertir un 4K a 60 fps a la resolución del
+3. **Optimizar vídeos pesados.** Convertir un 4K a 60 fps a la resolución del
    monitor y 30 fps con ffmpeg (NVENC), guardando el original. Estimación por
    lo medido (4K60 ~8 % de un núcleo, 1080p30 ~5 %): ahorraría unos 3 puntos
    por vídeo 4K. Coste: medio.
-7. **Arrastrar y soltar** imágenes y vídeos sobre la ventana para añadirlos a
-   la carpeta. Coste: poco.
-8. **Detalles de cada fondo**: resolución, duración, peso y códec (ffprobe) en
+4. **Detalles de cada fondo**: resolución, duración, peso y códec (ffprobe) en
    el menú de la tarjeta, y ordenar la colección por nombre, fecha o tipo.
    Coste: poco.
 

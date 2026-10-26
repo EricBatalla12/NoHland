@@ -65,6 +65,8 @@ EVENTOS_MONITOR = {"monitoraddedv2", "monitorremovedv2"}
 DEBOUNCE_S = 0.15
 # Tiempo sin pausa antes de hacer un cambio de rotacion que estaba pendiente
 GRACIA_ROTACION_S = 30
+# Fondos que recuerda `prev` por monitor
+HISTORIAL = 20
 
 
 def tipo_de(path: Path) -> str | None:
@@ -120,6 +122,8 @@ class Guardado:
     pausa_manual: bool = False
     # Fondo propio de cada workspace, por nombre ("1", "2", "gaming"...)
     workspaces: dict[str, str] = field(default_factory=dict)
+    # Fondos anteriores de cada monitor, el mas reciente al final (`prev`)
+    historial: dict[str, list[str]] = field(default_factory=dict)
 
     @classmethod
     def leer(cls) -> "Guardado":
@@ -140,6 +144,7 @@ class Guardado:
             greeter_imagen=datos.get("greeter_image"),
             pausa_manual=bool(datos.get("manual_pause", False)),
             workspaces=dict(datos.get("workspaces", {})),
+            historial={k: list(v) for k, v in datos.get("history", {}).items()},
         )
 
     def escribir(self) -> None:
@@ -156,6 +161,7 @@ class Guardado:
             "greeter_image": self.greeter_imagen,
             "manual_pause": self.pausa_manual,
             "workspaces": self.workspaces,
+            "history": self.historial,
         }, ensure_ascii=False, indent=1))
         os.replace(tmp, STATE_PATH)
 
@@ -178,6 +184,10 @@ class Daemon:
         self._gracia_timer: asyncio.TimerHandle | None = None
         self.pendientes: set[str] = set()
         self._greeter_copiado: Path | None = None
+        # Por donde iba cada video, por (monitor, ruta): al volver a un
+        # workspace su video sigue ahi en vez de empezar de cero. Solo en
+        # memoria: tras reiniciar el servicio da igual empezar de cero.
+        self.posiciones: dict[tuple[str, str], float] = {}
         self._stop = asyncio.Event()
         # asyncio solo guarda referencias debiles a las tareas sueltas
         self._tareas: set[asyncio.Task] = set()
@@ -357,7 +367,13 @@ class Daemon:
         # Se suelta antes de pararlo para que _vigilar no lo cuente como caida
         if p.player:
             player, p.player = p.player, None
+            await self._guardar_posicion(player)
             await player.stop()
+
+    async def _guardar_posicion(self, player: MpvPaper) -> None:
+        """Apunta por donde iba el video, para seguir ahi al volver a su workspace."""
+        if player.alive and (pos := await player.posicion()) is not None:
+            self.posiciones[(player.monitor, str(player.path))] = pos
 
     # -------------------------------------------------------- cambio de fondo
 
@@ -383,7 +399,8 @@ class Daemon:
             if general:
                 await self._poner_general(asignaciones)
             else:
-                await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace))
+                await self._aplicar(asignaciones, generales=self._repartir(asignaciones, solo_workspace),
+                                    registrar=True)
         self._cambio_manual(destinos)
         if general:
             # Con -m, otro monitor puede estar en un workspace que acaba de
@@ -397,7 +414,7 @@ class Daemon:
             log.info("workspaces %s: dejan su fondo propio y usan el general",
                      ", ".join(sorted(self.guardado.workspaces)))
             self.guardado.workspaces.clear()
-        await self._aplicar(asignaciones, generales=set(asignaciones))
+        await self._aplicar(asignaciones, generales=set(asignaciones), registrar=True)
 
     async def next(self, monitor: str | None) -> None:
         """Cada monitor avanza por su propia carpeta."""
@@ -407,8 +424,26 @@ class Daemon:
             if nombre not in asignaciones:
                 raise ValueError(f"no hay fondos en {config.directorio_de(self.cfg, nombre)}")
         async with self._lock:
-            await self._aplicar(asignaciones, generales=self._repartir(asignaciones))
+            await self._aplicar(asignaciones, generales=self._repartir(asignaciones), registrar=True)
         self._cambio_manual(destinos)
+
+    async def prev(self, monitor: str | None) -> None:
+        """Vuelve al fondo anterior de cada monitor (lo elegido a mano o por la
+        rotacion; los que ya no existen se saltan)."""
+        destinos = self._destinos(monitor)
+        async with self._lock:
+            asignaciones = {}
+            for nombre in destinos:
+                h = self.guardado.historial.get(nombre, [])
+                while h:
+                    anterior = Path(h.pop())
+                    if anterior.is_file() and anterior != self.pantallas[nombre].actual:
+                        asignaciones[nombre] = anterior
+                        break
+            if not asignaciones:
+                raise ValueError("no hay un fondo anterior al que volver")
+            await self._aplicar(asignaciones, generales=self._repartir(asignaciones))
+        self._cambio_manual(list(asignaciones))
 
     def _siguientes(self, monitores, rotacion: bool = False) -> dict[str, Path]:
         """El siguiente fondo de la carpeta de cada monitor (sin los de carpeta vacia).
@@ -449,8 +484,12 @@ class Daemon:
         return asignaciones
 
     async def _aplicar(self, asignaciones: dict[str, Path], intentos: int = 1,
-                       generales: set[str] | None = None) -> None:
-        """Pone asignaciones[monitor] en cada monitor. Llamar con _lock cogido."""
+                       generales: set[str] | None = None, continuar: bool = False,
+                       registrar: bool = False) -> None:
+        """Pone asignaciones[monitor] en cada monitor. Llamar con _lock cogido.
+        continuar: los videos siguen por donde iban (cambio de workspace).
+        registrar: el fondo que se quita entra en el historial de `prev` (lo
+        elegido a mano y la rotacion; no los cambios de workspace)."""
         # 1) Un fotograma por video distinto, aunque vaya a varios monitores
         frames: dict[Path, Path | None] = {}
         for path in set(asignaciones.values()):
@@ -466,7 +505,8 @@ class Daemon:
             p = self.pantallas[nombre]
             p.error = None
             if animado(path):
-                nuevo = MpvPaper(self.cfg, path, nombre)
+                inicio = self.posiciones.get((nombre, str(path)), 0) if continuar else 0
+                nuevo = MpvPaper(self.cfg, path, nombre, inicio)
                 try:
                     await nuevo.start(paused=self.pausado(p))
                 except BackendError as e:
@@ -475,6 +515,7 @@ class Daemon:
                 viejo, p.player = p.player, nuevo
                 self._lanzar(self._vigilar(p, nuevo))
                 if viejo:
+                    await self._guardar_posicion(viejo)
                     await viejo.stop()
 
         # 3) Noctalia. La paleta sale del ultimo wallpaper-set, asi que el
@@ -503,6 +544,10 @@ class Daemon:
         # 4) Estado
         for nombre, path in asignaciones.items():
             p = self.pantallas[nombre]
+            if registrar and p.actual and p.actual != path:
+                h = self.guardado.historial.setdefault(nombre, [])
+                h.append(str(p.actual))
+                del h[:-HISTORIAL]
             p.actual = path
             # generales: monitores cuyo fondo general cambia (None = todos). Con
             # el fondo de un workspace, el general del monitor no se toca
@@ -681,7 +726,7 @@ class Daemon:
         log.info("rotacion: toca cambiar en %s", ", ".join(sorted(asignaciones)))
         try:
             async with self._lock:
-                await self._aplicar(asignaciones, generales=self._repartir(asignaciones))
+                await self._aplicar(asignaciones, generales=self._repartir(asignaciones), registrar=True)
         except (BackendError, ValueError) as e:
             log.error("rotacion: no pude cambiar: %s", e)
 
@@ -761,7 +806,7 @@ class Daemon:
             cambios = {n: f for n, f in cambios.items() if n in self.pantallas and f != self.pantallas[n].actual}
             if cambios:
                 try:
-                    await self._aplicar(cambios, generales=set())
+                    await self._aplicar(cambios, generales=set(), continuar=True)
                 except (BackendError, ValueError) as e:
                     log.error("workspace: no pude cambiar el fondo: %s", e)
                     return
@@ -909,6 +954,8 @@ class Daemon:
             await self.quitar_propio(monitor)
         elif orden == "next":
             await self.next(monitor)
+        elif orden == "prev":
+            await self.prev(monitor)
         elif orden == "pause":
             self.manual_pause = self.guardado.pausa_manual = True
             self.guardado.escribir()
@@ -951,6 +998,7 @@ class Daemon:
                 "error": p.error,
                 "workspace": p.workspace,
                 "workspace_own": bool(self._propio(p)),
+                "has_previous": bool(self.guardado.historial.get(p.nombre)),
             }
             if p.player and p.player.alive:
                 info = await p.player.info()
