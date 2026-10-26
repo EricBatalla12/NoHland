@@ -68,9 +68,9 @@ CSS = """
 
 /* --- coleccion */
 .tarjeta { border-radius: 18px; background: alpha(@window_fg_color, 0.06);
-           transition: box-shadow 200ms ease, outline-color 200ms ease, transform 200ms ease;
+           transition: box-shadow 200ms ease, outline-color 200ms ease;
            outline: 3px solid transparent; outline-offset: 2px; }
-flowboxchild:hover .tarjeta { box-shadow: 0 10px 28px alpha(black, 0.45); transform: translateY(-3px); }
+flowboxchild:hover .tarjeta { box-shadow: 0 10px 28px alpha(black, 0.45); }
 flowboxchild:focus-visible .tarjeta { outline-color: alpha(@accent_bg_color, 0.6); }
 .tarjeta.actual { outline-color: @accent_bg_color; }
 .tarjeta-velo { background-image: linear-gradient(to top, alpha(black, 0.78), transparent); padding: 28px 14px 12px 14px; }
@@ -191,9 +191,7 @@ class Cubierta(Gtk.Widget):
 
     def do_measure(self, orientacion, para):
         if orientacion == Gtk.Orientation.HORIZONTAL:
-            # El natural decide cuantas tarjetas caben por fila: con 320 salian
-            # 2 en una ventana de 1024 px; con 260, 3
-            return self.ancho_minimo, max(self.ancho_minimo, 260), -1, -1
+            return self.ancho_minimo, max(self.ancho_minimo, 320), -1, -1
         if self.alto:
             return self.alto, self.alto, -1, -1
         alto = round((para if para > 0 else 320) * 9 / 16)
@@ -746,7 +744,7 @@ class Ventana(Adw.ApplicationWindow):
         # --- cabecera de la coleccion
         titulo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True, valign=Gtk.Align.CENTER)
         titulo.append(_etiqueta("Colección", "title-2", xalign=0))
-        self.ruta_carpeta = _etiqueta("", "dim-label", "caption", xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self.ruta_carpeta = _etiqueta("", "dim-label", "caption", xalign=0, ellipsize=Pango.EllipsizeMode.START)
         titulo.append(self.ruta_carpeta)
 
         self.filtro = Adw.ToggleGroup(valign=Gtk.Align.CENTER)
@@ -755,7 +753,7 @@ class Ventana(Adw.ApplicationWindow):
         self.filtro.set_active_name("todo")
         self.filtro.connect("notify::active-name", lambda *_: self._filtrar())
 
-        self.busqueda = Gtk.SearchEntry(placeholder_text="Buscar fondos", valign=Gtk.Align.CENTER, hexpand=True)
+        self.busqueda = Gtk.SearchEntry(placeholder_text="Buscar fondos", valign=Gtk.Align.CENTER, width_chars=22)
         self.busqueda.connect("search-changed", lambda *_: self._filtrar())
 
         carpeta = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER,
@@ -782,17 +780,9 @@ class Ventana(Adw.ApplicationWindow):
         self.boton_rotacion.add_css_class("flat")
         rotacion.append(self.boton_rotacion)
 
-        # En dos filas: en una sola, con la ventana a 1024 px, GTK encogia los
-        # filtros hasta «Imá…» y «Ani…»
-        barra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        fila = Gtk.Box(spacing=12)
-        for w in (titulo, rotacion):
-            fila.append(w)
-        barra.append(fila)
-        fila = Gtk.Box(spacing=12)
-        for w in (self.filtro, self.busqueda, carpeta):
-            fila.append(w)
-        barra.append(fila)
+        barra = Gtk.Box(spacing=12)
+        for w in (titulo, rotacion, self.filtro, self.busqueda, carpeta):
+            barra.append(w)
 
         # --- cuadricula
         self.cuadricula = Gtk.FlowBox(
@@ -1096,8 +1086,7 @@ class Ventana(Adw.ApplicationWindow):
         visibles = sum(1 for t in self.tarjetas.values() if self._pasa_filtro(t))
         total = len(self.tarjetas)
         animados = sum(1 for t in self.tarjetas.values() if t.tipo != "imagen")
-        self.ruta_carpeta.set_label(f"{total} fondos · {animados} animados · {config._con_tilde(self.carpeta)}")
-        self.ruta_carpeta.set_tooltip_text(str(self.carpeta))
+        self.ruta_carpeta.set_label(f"{total} fondos · {animados} animados · {self.carpeta}")
         self.pila.set_visible_child_name("vacio" if not total else "fondos" if visibles else "nada")
 
     def _pedir_miniatura(self, path: Path, al_terminar, tamano=miniaturas.TARJETA) -> None:
